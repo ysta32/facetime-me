@@ -1,0 +1,7 @@
+{
+  "name": "acme-web",
+  "version": "1.4.2",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node scripts/build.mjs" }
+}
