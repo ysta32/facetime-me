@@ -102,8 +102,9 @@ export default defineAgent({
     const session = new voice.AgentSession({
       llm: new realtime.RealtimeModel({
         model: 'gpt-realtime', voice: settings.voice ?? persona.voice, inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
-        // Semantic turn detection plus phone noise reduction: a cough or a TV in the room is not a turn.
-        turnDetection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true },
+        // Semantic turn detection, eager so replies start fast; noise reduction for phone audio. The yes-check
+        // in heardYes() is what stops noise from approving anything, so eagerness can stay high.
+        turnDetection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true },
         inputAudioNoiseReduction: { type: 'near_field' },
       }),
     });
