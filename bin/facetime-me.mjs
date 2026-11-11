@@ -80,18 +80,34 @@ function jobFromHook(hook) {
 
 function demoJob() {
   const folder = join(HOME, 'demo', 'acme-web');
+  const step = stage => ({ command: process.execPath, args: [join(HOME, 'demo', 'steps.mjs'), stage, folder, join(STATE, 'demo-events.log')], cwd: folder, timeoutMs: 40000 });
+  // One call, three asks. Each yes runs real work in demo/acme-web that the mascot shows live.
   return {
-    kind: 'failure', canFix: true, demo: true, look: 'error', project: 'acme-web', dedupeKey: null, greetMs: 2400,
-    card: { kind: 'error', title: 'Build failed', command: 'npm run build', lines: ['Missing AUTH_SECRET', 'in src/auth.ts'] },
-    context: 'Project: acme-web. The build failed on a missing AUTH_SECRET env var in auth.ts.',
-    summary: 'acme-web: `npm run build` failed on a missing AUTH_SECRET in auth.ts (demo).',
-    fix: { command: process.execPath, args: [join(HOME, 'demo', 'apply-fix.mjs'), folder], cwd: folder, timeoutMs: 15000 },
+    kind: 'failure', canFix: true, demo: true, look: 'error', project: 'acme-web', dedupeKey: null, greetMs: 1400,
+    context: 'Project: acme-web. The build failed on a missing AUTH_SECRET env var in auth.ts. You walk the developer through fixing it, pushing it, and deploying it to staging, asking before each.',
+    summary: 'acme-web: build fixed, pushed to main and deployed to staging over FaceTime (demo).',
+    stages: [
+      {
+        card: { kind: 'error', title: 'Build failed', command: 'npm run build', lines: ['Missing AUTH_SECRET', 'src/auth.ts:14'] },
+        line: "Hey! Your build just broke. auth.ts needs an AUTH_SECRET, and it isn't set. Want me to fix it?",
+        wait: 'Fix it?', ack: 'On it!', fix: step('fix'),
+      },
+      {
+        card: { kind: 'approve', title: 'Can I push this?', command: 'git push origin main', lines: ['fix: load AUTH_SECRET', '12 tests passing'] },
+        line: 'Fixed! The build is green and all twelve tests pass. Can I commit it and push to main?',
+        wait: 'Push to main?', ack: 'Pushing it now.', fix: step('push'),
+      },
+      {
+        card: { kind: 'approve', title: 'Ship to staging?', command: 'npm run deploy', lines: ['staging.acme-web.dev'] },
+        line: "It's on main. Want me to ship it to staging too?",
+        wait: 'Deploy?', ack: 'Shipping it!', fix: step('deploy'),
+      },
+    ],
+    finalCard: { kind: 'done', title: 'Shipped', tests: { pass: 12, fail: 0 }, lines: ['Live on staging'] },
     lines: {
-      explain: 'Hey, your build just failed on a missing env var in auth.ts.',
-      ask: 'Want me to fix it?',
-      fixed: "Done, it's building now.",
-      noAnswer: "No answer, so I'll leave it. Bye.",
-      bye: "Okay, I'll leave it. Bye.",
+      fixed: "It's live on staging. Nice work, bye!",
+      noAnswer: "No answer, so I'll stop here. Bye!",
+      bye: "Okay, I'll leave the rest to you. Bye!",
     },
   };
 }

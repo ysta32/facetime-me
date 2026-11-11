@@ -35,7 +35,14 @@ function instructionsFor(job, persona) {
     'Speak in very short sentences. Never read code, paths or stack traces aloud in full.',
     'Background noise, silence or your own echo is not the developer talking. Only act on clear words.',
   ];
-  if (job.canFix) lines.push(
+  if (job.stages) lines.push(
+    'You are walking the developer through a few steps on this call, asking before each one. You just asked a yes or no question.',
+    'If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself (the tool says the acknowledgement for you).',
+    'If they say no, or want to handle it themselves, call the end_call tool and say nothing yourself.',
+    'If they ask something else, answer in one short sentence and then ask your last question again.',
+    'Never answer your own question. Until the developer has actually said yes out loud, never thank them and never say you are doing it.',
+  );
+  else if (job.canFix) lines.push(
     'You asked whether to fix the problem. If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself (the tool says the acknowledgement for you).',
     'If they say no, or want to handle it themselves, call the end_call tool and say nothing yourself.',
     'If they ask something else, answer in one short sentence and then ask again whether you should fix it.',
@@ -122,7 +129,8 @@ export default defineAgent({
     });
 
     // ElevenLabs reads a fixed line straight out, word for word, with no model turn in between.
-    const say = (text, toolChoice = 'none') => eleven ? session.say(text, { allowInterruptions: false }) : session.generateReply({
+    const say = (text, toolChoice = 'none') => { if (job.demo) demoEvent(`said ${JSON.stringify(text)}`); return sayRaw(text, toolChoice); };
+    const sayRaw = (text, toolChoice) => eleven ? session.say(text, { allowInterruptions: false }) : session.generateReply({
       // Phrased so the model reads it as its own line to the developer, not a question put to it.
       instructions: `Speak this line to the developer now, word for word, as your own words. It is not addressed to you, so do not answer or react to it, and add nothing: "${text}"`, allowInterruptions: false, toolChoice,
     });
@@ -152,9 +160,9 @@ export default defineAgent({
     }
 
     /** Runs the fixer and mirrors its live tool calls onto the mascot. */
-    function runFix() {
+    function runFix(spec = job.fix) {
       return new Promise(resolve => {
-        const { command, args, cwd, env } = job.fix;
+        const { command, args, cwd, env } = spec;
         const stream = new FixStream({
           onLook: (look, detail) => {
             fixLook = look;
@@ -172,15 +180,54 @@ export default defineAgent({
         let errText = '';
         child.stdout.on('data', chunk => stream.push(String(chunk)));
         child.stderr.on('data', chunk => { errText += chunk; });
-        const timer = setTimeout(() => child.kill('SIGTERM'), job.fix.timeoutMs ?? 180000);
+        const timer = setTimeout(() => child.kill('SIGTERM'), spec.timeoutMs ?? 180000);
         const finish = ok => { clearTimeout(timer); stream.end(); const { text, isError } = stream.outcome(); resolve({ ok: ok && !isError, text: text || errText.trim(), isError }); };
         child.on('error', () => finish(false));
         child.on('close', code => finish(code === 0));
       });
     }
 
-    let fixPromise = null;
+    let fixPromise = null, stageIndex = 0;
+    /** Puts one stage's question on screen and asks it; the developer's yes runs that stage. */
+    const askStage = async stage => {
+      setPhase('explain');
+      mascot.card(stage.card);
+      askedAt = Date.now();
+      demoEvent(`ask ${JSON.stringify(stage.wait ?? '')}`);
+      await say(stage.line).waitForPlayout();
+      setPhase('ask');
+      mascot.card({ kind: 'waiting', title: stage.wait ?? 'Okay?' });
+      lastReplyAsked = true;
+      setPhase('open');
+      armSilence();
+    };
+    const runStage = async () => {
+      const stage = job.stages[stageIndex];
+      clearSilence();
+      demoEvent(`yes ${stageIndex}`);
+      setPhase('fixing');
+      mascot.card({ kind: 'thinking', title: 'Getting started' });
+      say(stage.ack ?? 'On it.');
+      result.fix = { status: 'running', stage: stageIndex }; save();
+      demoEvent(`stage-start ${stageIndex}`);
+      const { ok, text } = await runFix(stage.fix);
+      await sleep(600);
+      demoEvent(`stage-${ok ? 'ok' : 'failed'} ${stageIndex}`);
+      if (!ok) {
+        result.fix = { status: 'failed', stage: stageIndex, summary: (text ?? '').slice(-1500) }; save();
+        mascot.card({ kind: 'error', title: "That didn't work", lines: ['Texting you the details'] });
+        return wrapUp("Hmm, that didn't work. I'm texting you the details.", 'fix_failed');
+      }
+      result.fix = { status: stageIndex === job.stages.length - 1 ? 'fixed' : 'running', stage: stageIndex, summary: (text ?? '').slice(-1500) }; save();
+      stageIndex++;
+      fixPromise = null;
+      if (stageIndex < job.stages.length) return askStage(job.stages[stageIndex]);
+      demoEvent('fix-ok');
+      mascot.card(job.finalCard ?? { kind: 'done', title: 'Done' });
+      return wrapUp(job.lines.fixed, 'fixed');
+    };
     const startFix = async () => {
+      if (job.stages) return runStage();
       clearSilence();
       setPhase('fixing');
       mascot.card({ kind: 'thinking', title: 'Getting started' });
@@ -274,7 +321,7 @@ export default defineAgent({
       const item = event.item, text = item?.textContent?.trim();
       if (!text) return;
       if (item.role === 'assistant') { result.agentSaid.push(text); lastReplyAsked = text.endsWith('?'); refresh(); }
-      if (item.role === 'user') { result.userSaid.push(text); heard.push({ at: Date.now(), text }); }
+      if (item.role === 'user') { result.userSaid.push(text); heard.push({ at: Date.now(), text }); if (job.demo) demoEvent(`heard ${JSON.stringify(text)}`); }
       save();
     });
     session.on(voice.AgentSessionEventTypes.Error, event => { result.lastError = String(event?.error?.message ?? event?.error ?? 'unknown').slice(0, 300); save(); });
@@ -325,6 +372,7 @@ export default defineAgent({
         lastReplyAsked = true;
         return refresh();
       }
+      if (job.stages) return askStage(job.stages[0]);
       setPhase('explain');
       mascot.card(job.card ?? { kind: 'error', title: 'Something broke', lines: [job.summary ?? ''] });
       askedAt = Date.now();

@@ -73,7 +73,7 @@ fix after it hears a clear yes in your words, so background noise can't say yes 
 | `facetime-me --setup` | The setup above. Re-run it to change keys or add the alert hooks |
 | `facetime-me --listen` | Answer FaceTime calls until Ctrl+C. One listener at a time |
 | `facetime-me --preview` | See the call screen in your browser and pick a personality, voice and background |
-| `facetime-me --demo` | A scripted, recordable demo: a build fails, it calls you, fixes it on the call |
+| `facetime-me --demo` | A recordable demo, all in one call: a build fails, it calls you, then asks before fixing it, pushing to main and deploying to staging, doing each for real in a throwaway repo |
 | `facetime-me --on` / `--off` / `--status` | Pause or resume the "call me when something breaks" alerts |
 
 ## How it works

@@ -68,28 +68,52 @@ function render(line) {
   }
 }
 
+const quote = raw => { try { return JSON.parse(raw); } catch { return raw; } };
+const ASKS = ['Fix the build', 'Push to main', 'Deploy to staging'];
+
 async function followCall() {
   let seen = 0, finished = false;
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + 4 * 60000;
   while (!finished && Date.now() < deadline) {
-    await sleep(200);
-    const lines = existsSync(FEED) ? readFileSync(FEED, 'utf8').trim().split('\n').filter(Boolean) : [];
+    await sleep(150);
+    const lines = existsSync(FEED) ? readFileSync(FEED, 'utf8').split('\n').filter(Boolean) : [];
     for (const event of lines.slice(seen)) {
-      if (event === 'ringing') say(`\n${c.coral}☎${c.off}  ${c.bold}FaceTiming you…${c.off}`);
-      if (event === 'answered') say(`${c.dim}   connected${c.off}`);
-      if (event === 'fix-start') say(`\n${c.coral}⏺${c.off} Adding AUTH_SECRET to .env.local and rebuilding…`);
-      if (event === 'fix-ok') {
-        const log = readFileSync(join(FOLDER, '.build.log'), 'utf8').trim();
-        say(`\n${log}\n\n${c.green}✓ Build fixed.${c.off}`);
+      const [kind, ...rest] = event.split(' '), arg = rest.join(' ');
+      if (kind === 'ringing') say(`\n${c.coral}☎${c.off}  ${c.bold}FaceTiming you…${c.off}`);
+      else if (kind === 'answered') say(`${c.green}   ● connected${c.off}`);
+      else if (kind === 'said') say(`\n   ${c.coral}Claude${c.off}  ${quote(arg)}`);
+      else if (kind === 'heard') say(`   ${c.bold}You${c.off}     ${quote(arg)}`);
+      else if (kind === 'ask') say(`   ${c.yellow}⏸  ${quote(arg) || 'Okay?'}${c.off} ${c.dim}waiting for your answer on FaceTime${c.off}`);
+      else if (kind === 'yes') say(`   ${c.green}✓ approved on FaceTime${c.off} ${c.dim}(${ASKS[Number(arg)] ?? 'go ahead'})${c.off}`);
+      else if (kind === 'term') {
+        const text = quote(arg);
+        if (text.startsWith('tool ')) say(`\n${c.coral}⏺${c.off} ${c.bold}${text.slice(5)}${c.off}`);
+        else if (text.startsWith('out ')) say(text.slice(4).split('\n').slice(0, 8).map((l, i) => `  ${c.dim}${i ? ' ' : '⎿'}${c.off}  ${/✔|✓|built in|Live at|pass 12/.test(l) ? c.green : /✖|✗|fail [1-9]/.test(l) ? c.red : ''}${l}${c.off}`).join('\n'));
       }
-      if (event === 'fix-failed') say(`\n${c.red}✗ The fix did not work.${c.off}`);
-      if (event === 'summary-sent') say(`${c.dim}   summary texted${c.off}`);
-      if (event.startsWith('call-failed')) say(`\n${c.red}Call failed: ${event.slice(12)}${c.off}`);
-      if (event === 'call-done') finished = true;
+      else if (kind === 'stage-failed') say(`\n${c.red}✗ That step failed.${c.off}`);
+      else if (kind === 'fix-ok') say(`\n${c.green}✓ Fixed, pushed and live on staging, all from one FaceTime call.${c.off}`);
+      else if (kind === 'summary-sent') say(`${c.dim}   summary texted${c.off}`);
+      else if (kind === 'call-failed') say(`\n${c.red}Call failed: ${arg}${c.off}`);
+      else if (kind === 'call-done') finished = true;
     }
     seen = lines.length;
   }
-  if (!finished) say(`\n${c.yellow}The call did not report an end within two minutes. See ~/facetime-me/state/facetime-me.log${c.off}`);
+  if (!finished) say(`\n${c.yellow}The call did not report an end within four minutes. See ~/facetime-me/state/facetime-me.log${c.off}`);
+}
+
+/** A real repo with a local "origin", so the commit and push on the call are real too. */
+function makeRepo() {
+  const remote = join(STATE_DIR, 'demo-remote.git');
+  rmSync(remote, { recursive: true, force: true });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=Acme Dev', '-c', 'user.email=dev@acme-web.dev', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd: FOLDER, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'acme-web 1.4.2');
+  execFileSync('git', ['init', '-q', '--bare', remote], { stdio: 'ignore' });
+  git('remote', 'add', 'origin', remote);
+  git('push', '-q', 'origin', 'HEAD:main');
+  git('branch', '-q', '-M', 'main');
+  git('branch', '-q', '--set-upstream-to=origin/main');
 }
 
 export async function runDemo(args) {
@@ -100,6 +124,7 @@ export async function runDemo(args) {
   }
   rmSync(FOLDER, { recursive: true, force: true });
   cpSync(join(HERE, 'template'), FOLDER, { recursive: true });
+  makeRepo();
   writeFileSync(FEED, '');
   // Warm the agent during the countdown so the call fires right after the error, not several seconds later.
   const logFd = openSync(join(STATE_DIR, 'worker.log'), 'a');

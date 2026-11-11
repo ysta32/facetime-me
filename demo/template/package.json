@@ -3,5 +3,9 @@
   "version": "1.4.2",
   "private": true,
   "type": "module",
-  "scripts": { "build": "node scripts/build.mjs" }
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "deploy": "node scripts/deploy.mjs"
+  }
 }
