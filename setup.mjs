@@ -227,8 +227,13 @@ export async function setElevenLabsKey() {
     key = raw.trim();
   }
   if (!key) fail('no key given. Copy it from https://elevenlabs.io/app/settings/api-keys, then: pbpaste | facetime-me --key elevenlabs');
-  const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(15000) }).catch(() => null);
-  if (!res?.ok) fail(`ElevenLabs rejected that key${res ? ` (HTTP ${res.status})` : ''}. Make sure it can read voices and use Text to Speech.`);
+  // Calls only need Text to Speech, so test exactly that (three characters). Restricted keys without
+  // voices_read are fine: the preview then offers ElevenLabs' built-in voices.
+  const res = await fetch('https://api.elevenlabs.io/v1/text-to-speech/bIHbv24MWmeRgasZH58o?output_format=mp3_22050_32', {
+    method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'Hi.', model_id: 'eleven_flash_v2_5' }), signal: AbortSignal.timeout(15000),
+  }).catch(() => null);
+  if (!res?.ok) fail(`ElevenLabs rejected that key${res ? ` (HTTP ${res.status})` : ''}. Give it the Text to Speech permission.`);
   writeEnv({ ELEVENLABS_API_KEY: key });
   ok('saved to .env.local. Calls now speak with ElevenLabs. Pick a voice in facetime-me --preview.');
 }

@@ -75,10 +75,20 @@ async function voiceSample(personaId, voice, style) {
 
 const ELEVEN_DEFAULT = 'bIHbv24MWmeRgasZH58o';
 let elevenVoices = null;
+const BUILT_IN_VOICES = [
+  ['bIHbv24MWmeRgasZH58o', 'Will', 'male, young, relaxed'], ['TX3LPaxmHKxFdv7VOQHJ', 'Liam', 'male, young, energetic'],
+  ['IKne3meq5aSn9XLyUdCD', 'Charlie', 'male, Australian, playful'], ['iP95p4xoKVk53GoZ742B', 'Chris', 'male, casual, down to earth'],
+  ['cjVigY5qzO86Huf0OWal', 'Eric', 'male, smooth, friendly'], ['nPczCjzI2devNBz1zQrb', 'Brian', 'male, deep, calm'],
+  ['cgSgspJ2msm6clMCkdW9', 'Jessica', 'female, young, playful'], ['FGY2WhTYpPnrIDTdsKH5', 'Laura', 'female, young, upbeat'],
+  ['EXAVITQu4vr4xnSDxMaL', 'Sarah', 'female, warm, confident'], ['Xb7hH8MSUJpSbSDYk0k2', 'Alice', 'female, British, clear'],
+  ['SAz9YHcvj6GT2YYXdXww', 'River', 'neutral, relaxed'], ['XrExE9yKIg1WjnnlVkGX', 'Matilda', 'female, warm, friendly'],
+].map(([id, name, about]) => ({ id, name, about }));
 async function elevenList() {
   if (!process.env.ELEVENLABS_API_KEY) return null;
   if (elevenVoices) return elevenVoices;
   const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY }, signal: AbortSignal.timeout(15000) });
+  // A key without voices_read can still speak: offer ElevenLabs' built-in voices.
+  if (res.status === 401) return (elevenVoices = BUILT_IN_VOICES);
   if (!res.ok) throw Object.assign(new Error(`ElevenLabs would not list voices (HTTP ${res.status})`), { status: 502 });
   const { voices } = await res.json();
   elevenVoices = voices.map(v => ({ id: v.voice_id, name: v.name.split(' - ')[0], about: [v.labels?.gender, v.labels?.age, v.labels?.accent, v.labels?.descriptive ?? v.labels?.description].filter(Boolean).join(', ') }));
