@@ -32,7 +32,7 @@ function instructionsFor(job, persona) {
     'Background noise, silence or your own echo is not the developer talking. Only act on clear words.',
   ];
   if (job.canFix) lines.push(
-    'You asked whether to fix the problem. If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself.',
+    'You asked whether to fix the problem. If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself (the tool says the acknowledgement for you).',
     'If they say no, or want to handle it themselves, call the end_call tool and say nothing yourself.',
     'If they ask something else, answer in one short sentence and then ask again whether you should fix it.',
   );
@@ -102,7 +102,7 @@ export default defineAgent({
 
     const session = new voice.AgentSession({
       llm: new realtime.RealtimeModel({
-        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, Number(settings.speed) || 1.2)), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, Number(settings.speed) || 1.1)), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
         // Semantic turn detection, eager so replies start fast; noise reduction for phone audio. The yes-check
         // in heardYes() is what stops noise from approving anything, so eagerness can stay high.
         turnDetection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true },
@@ -172,6 +172,8 @@ export default defineAgent({
       clearSilence();
       setPhase('fixing');
       mascot.card({ kind: 'thinking', title: 'Getting started' });
+      // Answer the yes out loud right away, so the developer is never left in silence while the fix runs.
+      say(job.lines.approved ?? 'On it.');
       result.fix = { status: 'running' }; save();
       demoEvent('fix-start');
       const startedAt = Date.now();

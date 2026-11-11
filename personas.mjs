@@ -125,6 +125,6 @@ export function personaLines(persona, job) {
   const p = persona.lines, own = job.lines ?? {};
   if (job.inbound) return { ...own, hello: p.hello, bye: p.bye };
   if (job.approval) return { ...own, ask: p.ask, approved: p.approved, denied: p.denied, noAnswer: p.noAnswer };
-  if (job.canFix) return { ...own, ask: p.fixAsk };
+  if (job.canFix) return { ...own, ask: p.fixAsk, approved: p.approved };
   return own;
 }
