@@ -1,7 +1,7 @@
 // Runs detached from the hook: starts the agent, places the outbound call, follows it, texts the summary, cleans up.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AgentDispatchClient, RoomServiceClient, TrackType } from 'livekit-server-sdk';
@@ -151,8 +151,10 @@ try {
     delete state.lastCallAt;
     (await import('./lib.mjs')).writeJson(statePath, state);
   }
+  // Chert refused the key: remember it so approvals skip straight to the terminal until `facetime-me --key`.
+  if ([401, 403].includes(error.status)) writeFileSync(join(STATE, 'key-invalid'), `${new Date().toISOString()} ${error.message}\n`);
   if (callId) await sendSummary(null, readJson(resultPath(room), null), error.message).catch(() => {});
-  else await pushFallback(error.message).catch(() => {});
+  else if (!job.approval) await pushFallback(error.message).catch(() => {});
 } finally {
   worker?.kill('SIGTERM');
   await rooms.deleteRoom(room).catch(() => {});

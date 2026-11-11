@@ -156,12 +156,30 @@ export async function setup(argv = []) {
   console.log(`\n${c.bold('All set.')} Start it with:\n\n    ${c.bold('facetime-me --listen')}\n\nthen FaceTime ${c.bold(number ?? 'your Chert line')} from your iPhone, iPad or Mac.\n`);
 }
 
+/** True when Chert accepts this project API key for the project. */
+async function keyWorks(key, projectId) {
+  if (!key || !projectId) return false;
+  try {
+    const response = await fetch('https://app.trychert.com/api/v1/lines', { headers: { authorization: `Bearer ${key}`, 'x-chert-project-id': projectId }, signal: AbortSignal.timeout(10000) });
+    return response.ok;
+  } catch { return false; }
+}
+
 async function installAlerts() {
   const current = config();
   const phone = await ask(`  Your phone number, the one you verified with Chert (+1…)${current.phone ? ` [${current.phone}]` : ''}: `, { fallback: current.phone ?? '' });
   if (!/^\+\d{8,15}$/.test(phone)) fail('use the full number with country code, like +14155550123.');
   writeJson(CONFIG_PATH, { ...config(), phone });
-  // Outbound calls use the `chert login` session from step 2; a CHERT_API_KEY in .env.local also works.
+  // Placing calls needs a project API key; a `chert login` session is refused (cli_scope_denied).
+  if (!(await keyWorks(readEnv().CHERT_API_KEY, config().projectId))) {
+    console.log(`  Calling you needs a project API key. Make one (owner only) at https://app.trychert.com/developer?project=${config().projectId}`);
+    const key = await ask('  CHERT_API_KEY (ftk_…, hidden): ', { secret: true });
+    if (!key.startsWith('ftk_')) fail('that is not a Chert project key (they start with ftk_).');
+    if (!(await keyWorks(key, config().projectId))) fail('Chert rejected that key for this project. Check it was made in the right project.');
+    writeEnv({ CHERT_API_KEY: key });
+    rmSync(join(STATE, 'key-invalid'), { force: true });
+    ok('Chert key saved');
+  }
   const path = join(homedir(), '.claude', 'settings.json');
   const settings = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   if (existsSync(path)) copyFileSync(path, `${path}.bak-facetime-me`);
@@ -195,3 +213,17 @@ function linkCommand() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('setup.mjs')) await setup(process.argv.slice(2));
+
+/** `facetime-me --key`: saves a new Chert project API key (hidden), after checking Chert accepts it. */
+export async function setKey() {
+  if (!process.stdin.isTTY) fail('run this in a terminal.');
+  const projectId = config().projectId;
+  if (!projectId) fail('not set up yet. Run: facetime-me --setup');
+  console.log(`Make a key (owner only) at https://app.trychert.com/developer?project=${projectId}`);
+  const key = await ask('CHERT_API_KEY (ftk_…, hidden): ', { secret: true });
+  if (!key.startsWith('ftk_')) fail('that is not a Chert project key (they start with ftk_).');
+  if (!(await keyWorks(key, projectId))) fail('Chert rejected that key for this project. Check it was made in the right project.');
+  writeEnv({ CHERT_API_KEY: key });
+  rmSync(join(STATE, 'key-invalid'), { force: true });
+  ok('saved to .env.local. Outbound calls and FaceTime approvals are ready.');
+}

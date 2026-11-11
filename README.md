@@ -70,7 +70,7 @@ your iPhone ──FaceTime──▶ Chert's Mac ──LiveKit room──▶ agen
   `StopFailure` and `Notification`. On a real problem it places an outbound call (`place-call.mjs`),
   explains what broke, and if you say "yes, fix it" runs a headless `claude -p` fork of your session
   while the mascot mirrors its live tool calls (`activity.mjs`). There's a 10-minute cooldown and it never
-  calls twice about the same error. Outbound calls use your `chert login` session, so no extra key is needed.
+  calls twice about the same error. Outbound calls need a Chert project API key, made by the owner on the [Developer page](https://app.trychert.com/developer); setup asks for it and checks it.
 
 ## Using your own mascot art
 

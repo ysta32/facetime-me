@@ -45,15 +45,16 @@ export const demoFeed = join(STATE, 'demo-events.log');
 export const demoEvent = (text) => { try { appendFileSync(demoFeed, `${text}\n`); } catch { /* the terminal view is optional */ } };
 
 /**
- * The bearer for Chert's API: the `chert login` session in ~/.chert when it is signed in and unexpired
- * (so no extra key is needed), otherwise a project API key from CHERT_API_KEY. Never logged.
+ * The bearer for Chert's API: the project API key in CHERT_API_KEY (required to place calls and send texts;
+ * Chert refuses those to a CLI session with cli_scope_denied), else the `chert login` session, which can
+ * still read lines and calls. Never logged.
  */
 export function chertToken() {
+  if (process.env.CHERT_API_KEY) return process.env.CHERT_API_KEY;
   try {
     const saved = JSON.parse(readFileSync(join(process.env.CHERT_HOME || join(homedir(), '.chert'), 'credentials.json'), 'utf8'));
     if (saved.access_token && (!saved.expires_at || saved.expires_at > Date.now() + 60000)) return saved.access_token;
   } catch { /* not signed in on this computer */ }
-  if (process.env.CHERT_API_KEY) return process.env.CHERT_API_KEY;
   throw new Error('Chert is not signed in: run facetime-me --setup');
 }
 

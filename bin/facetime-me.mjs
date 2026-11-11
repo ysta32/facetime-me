@@ -4,6 +4,7 @@
 //   facetime-me --demo     records-friendly demo, see ~/facetime-me/demo
 //   facetime-me --on|--off|--status
 //   facetime-me --setup    one-time setup: Chert sign-in, phone verification, keys, hooks
+//   facetime-me --key      save a new Chert project API key (needed to place calls)
 //   facetime-me --listen   answer FaceTime calls to your Chert line until Ctrl+C (any terminal)
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -174,11 +175,15 @@ else if (arg === '--setup') {
   const { setup } = await import(pathToFileURL(join(HOME, 'setup.mjs')).href);
   await setup(process.argv.slice(3));
 }
+else if (arg === '--key') {
+  const { setKey } = await import(pathToFileURL(join(HOME, 'setup.mjs')).href);
+  await setKey();
+}
 else if (arg === '--listen') {
   const { listen } = await import(pathToFileURL(join(HOME, 'listen.mjs')).href);
   await listen();
 }
-else if (arg) { console.error('usage: facetime-me [--setup] [--listen] [--demo [--here]] [--on] [--off] [--status]'); process.exit(2); }
+else if (arg) { console.error('usage: facetime-me [--setup] [--key] [--listen] [--demo [--here]] [--on] [--off] [--status]'); process.exit(2); }
 else {
   try { await fromHook(); } catch (error) { log(`hook error: ${error.message}`); }
   process.exit(0);

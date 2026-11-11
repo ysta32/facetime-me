@@ -94,6 +94,7 @@ export async function approvalFromHook(hook) {
   // Fallback: the terminal prompt. In bypass mode "ask" brings it back for just this call.
   const fallback = reason => { log(`approval fell back to terminal: ${reason}`); return event === 'PreToolUse' ? decision(event, 'ask', `FaceTime approval unavailable (${reason})`) : null; };
   if (!settings.phone) return fallback('no phone in config.json');
+  if (existsSync(join(STATE, 'key-invalid'))) return fallback('Chert refused the API key; run facetime-me --key');
   if (!(await takeLock())) return fallback('another call is still on the line');
 
   const project = basename(hook.cwd || process.cwd());
