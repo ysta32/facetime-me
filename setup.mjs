@@ -216,11 +216,19 @@ if (process.argv[1] && process.argv[1].endsWith('setup.mjs')) await setup(proces
 
 /** `facetime-me --key`: saves a new Chert project API key (hidden), after checking Chert accepts it. */
 export async function setKey() {
-  if (!process.stdin.isTTY) fail('run this in a terminal.');
   const projectId = config().projectId;
   if (!projectId) fail('not set up yet. Run: facetime-me --setup');
-  console.log(`Make a key (owner only) at https://app.trychert.com/developer?project=${projectId}`);
-  const key = await ask('CHERT_API_KEY (ftk_…, hidden): ', { secret: true });
+  let key;
+  if (process.stdin.isTTY) {
+    console.log(`Make a key (owner only) at https://app.trychert.com/developer?project=${projectId}`);
+    key = await ask('CHERT_API_KEY (ftk_…, hidden): ', { secret: true });
+  } else {
+    // Piped, e.g. `pbpaste | facetime-me --key`: the key never appears on screen.
+    let raw = '';
+    for await (const chunk of process.stdin) raw += chunk;
+    key = raw.trim();
+    if (!key) fail(`no key on stdin. Copy it from https://app.trychert.com/developer?project=${projectId}, then: pbpaste | facetime-me --key`);
+  }
   if (!key.startsWith('ftk_')) fail('that is not a Chert project key (they start with ftk_).');
   if (!(await keyWorks(key, projectId))) fail('Chert rejected that key for this project. Check it was made in the right project.');
   writeEnv({ CHERT_API_KEY: key });
