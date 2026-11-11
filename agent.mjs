@@ -410,5 +410,13 @@ export default defineAgent({
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url), agentName: AGENT_NAME, port: 0, numIdleProcesses: 1 }));
+  // LiveKit reads port 0 as "unset" and falls back to 8081, which any other LiveKit agent on this Mac may
+  // already hold (EADDRINUSE kills our worker before it can publish). Ask the OS for a free port instead.
+  const { createServer } = await import('node:net');
+  const port = await new Promise((resolve, reject) => {
+    const probe = createServer().once('error', reject).listen(0, '127.0.0.1', () => {
+      const { port } = probe.address(); probe.close(() => resolve(port));
+    });
+  });
+  cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url), agentName: AGENT_NAME, port, numIdleProcesses: 1 }));
 }
