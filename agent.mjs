@@ -117,7 +117,7 @@ export default defineAgent({
     const session = new voice.AgentSession({
       ...(eleven ? { tts: new elevenlabs.TTS({
         apiKey: process.env.ELEVENLABS_API_KEY, voiceId: settings.elevenVoice || ELEVEN_DEFAULT_VOICE, model: 'eleven_flash_v2_5',
-        voiceSettings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true, speed: Math.min(1.2, Math.max(0.7, speed)) },
+        voiceSettings: { stability: 0.3, similarity_boost: 0.8, style: 0.55, use_speaker_boost: true, speed: Math.min(1.2, Math.max(0.7, speed)) },
       }) } : {}),
       llm: new realtime.RealtimeModel({
         model: 'gpt-realtime', ...(eleven ? { modalities: ['text'] } : { voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) }), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
@@ -205,6 +205,7 @@ export default defineAgent({
       const stage = job.stages[stageIndex];
       clearSilence();
       demoEvent(`yes ${stageIndex}`);
+      mascot.react({ hearts: 7, hop: true, bubble: 'yay!' });
       setPhase('fixing');
       mascot.card({ kind: 'thinking', title: 'Getting started' });
       say(stage.ack ?? 'On it.');
@@ -221,9 +222,11 @@ export default defineAgent({
       result.fix = { status: stageIndex === job.stages.length - 1 ? 'fixed' : 'running', stage: stageIndex, summary: (text ?? '').slice(-1500) }; save();
       stageIndex++;
       fixPromise = null;
+      mascot.react({ sparkles: 8 });
       if (stageIndex < job.stages.length) return askStage(job.stages[stageIndex]);
       demoEvent('fix-ok');
       mascot.card(job.finalCard ?? { kind: 'done', title: 'Done' });
+      setTimeout(() => mascot.react({ hearts: 10, sparkles: 10, hop: true, bubble: 'we did it!' }), 250);
       return wrapUp(job.lines.fixed, 'fixed');
     };
     const startFix = async () => {
@@ -231,6 +234,7 @@ export default defineAgent({
       clearSilence();
       setPhase('fixing');
       mascot.card({ kind: 'thinking', title: 'Getting started' });
+      mascot.react({ hearts: 7, hop: true, bubble: 'yay!' });
       // Answer the yes out loud right away, so the developer is never left in silence while the fix runs.
       say(job.lines.approved ?? 'On it.');
       result.fix = { status: 'running' }; save();
@@ -267,6 +271,7 @@ export default defineAgent({
       const decide = (decision, line, outcome) => {
         if (result.decision) return;
         result.decision = decision; save();
+        mascot.react(decision.behavior === 'allow' ? { hearts: 7, hop: true, bubble: 'yay!' } : { bubble: 'okay!' });
         void wrapUp(line, outcome).catch(() => {});
       };
       tools.approve = llm.tool({
@@ -364,6 +369,7 @@ export default defineAgent({
       result.answered = true; save();
       phase = 'greet';
       mascot.play('greeting');
+      mascot.react({ sparkles: 10, bubble: 'hi!' });
       await sleep(job.greetMs ?? 300);
       if (job.inbound) {
         setPhase('open');

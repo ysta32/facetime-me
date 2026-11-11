@@ -28,6 +28,10 @@ export const THEMES = {
 const palette = id => { const t = THEMES[id] ?? THEMES.night; return { ...t, sky: t.sky.map(hex), ground: t.ground.map(hex), star: t.star.map(hex), horizon: hex(t.horizon), shadow: hex(t.shadow), footer: hex(t.footer), cardShadow: hex(t.cardShadow) }; };
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
 
+// Cute reactions (see Scene.react): pink pixel hearts and white sparkles.
+const EFFECT = { heart: hex('#FF6F9C'), heartLight: hex('#FFC2D6'), heartDark: hex('#D9437A'), sparkle: hex('#FFFFFF'), sparkleSoft: hex('#FFE7A3') };
+const HEART = ['.##.##.', '#o####x', '######x', '.####x.', '..##x..', '...x...'];
+const HEART_BIG = ['.###.###.', '#oo######', '#o######x', '########x', '.######x.', '..####x..', '...##x...', '....x....'];
 const FONT = JSON.parse(readFileSync(join(HERE, 'font.json'), 'utf8'));
 const FW = FONT.w, FH = FONT.h, LINE = 12;
 
@@ -113,6 +117,57 @@ export class Scene {
     this.clouds = Array.from({ length: 4 }, (_, i) => ({ x: r() * LW, y: 20 + i * 52 + Math.floor(r() * 20), w: 22 + Math.floor(r() * 18), speed: 0.0015 + r() * 0.002 }));
     this.card = null;
     this.footer = '';
+    this.effects = [];
+  }
+
+  /**
+   * A short cute moment: "hearts" float up from the mascot, "sparkles" twinkle around it, and a
+   * speech bubble (e.g. "yay!") pops above its head. hop makes it jump once for joy.
+   */
+  react({ hearts = 0, sparkles = 0, bubble = null, hop = false } = {}, now = Date.now()) {
+    const r = rng(now & 0xffff);
+    const mid = LW / 2, head = this.headTop;
+    for (let i = 0; i < hearts; i++) this.effects.push({ kind: 'heart', at: now + i * 140, life: 1900, x: mid - 58 + r() * 108, y: head - 12 - r() * 14, drift: (r() - 0.5) * 22, big: r() > 0.4 });
+    for (let i = 0; i < sparkles; i++) this.effects.push({ kind: 'sparkle', at: now + i * 90, life: 900, x: mid - 80 + r() * 160, y: head - 30 + r() * 60 });
+    if (bubble) this.effects.push({ kind: 'bubble', at: now, life: 1500, text: bubble });
+    if (hop) this.effects.push({ kind: 'hop', at: now, life: 520 });
+  }
+
+  /** How far the mascot is lifted right now (a single happy hop). */
+  lift(now) {
+    const hop = this.effects.find(e => e.kind === 'hop' && now >= e.at && now < e.at + e.life);
+    return hop ? Math.round(Math.sin(Math.PI * (now - hop.at) / hop.life) * 10) : 0;
+  }
+
+  drawEffects(now) {
+    this.effects = this.effects.filter(e => now < e.at + e.life);
+    for (const e of this.effects) {
+      const t = now - e.at;
+      if (t < 0) continue;
+      const k = t / e.life;
+      if (e.kind === 'heart') {
+        const x = Math.round(e.x + Math.sin(k * 6) * 3 + e.drift * k), y = Math.round(e.y - k * 80);
+        if (k > 0.8 && (Math.floor(t / 60) & 1)) continue; // blink out at the end
+        const shape = e.big ? HEART_BIG : HEART;
+        shape.forEach((row, j) => [...row].forEach((ch, i) => { if (ch !== '.') this.dot(x + i, y + j, ch === 'o' ? EFFECT.heartLight : ch === '#' ? EFFECT.heart : EFFECT.heartDark); }));
+      }
+      if (e.kind === 'sparkle') {
+        const x = Math.round(e.x), y = Math.round(e.y), arm = k < 0.5 ? 1 + Math.round(k * 4) : Math.max(0, 3 - Math.round((k - 0.5) * 6));
+        this.dot(x, y, EFFECT.sparkle);
+        for (let a = 1; a <= arm; a++) for (const [dx, dy] of [[a, 0], [-a, 0], [0, a], [0, -a]]) this.dot(x + dx, y + dy, a === arm ? EFFECT.sparkleSoft : EFFECT.sparkle);
+      }
+      if (e.kind === 'bubble') {
+        const n = e.text.length, w = n * FW + 10, h = 15, pop = Math.min(1, t / 120);
+        const x0 = Math.round(LW / 2 + 18), y0 = Math.round(this.headTop - 2 - h * pop - (k > 0.85 ? (k - 0.85) * 40 : 0));
+        if (pop < 1) continue;
+        this.rect(x0 + 1, y0, w - 2, h, C.paper); this.rect(x0, y0 + 1, w, h - 2, C.paper);
+        for (let i = 1; i < w - 1; i++) { this.dot(x0 + i, y0 - 1, C.ink); this.dot(x0 + i, y0 + h, C.ink); }
+        for (let j = 1; j < h - 1; j++) { this.dot(x0 - 1, y0 + j, C.ink); this.dot(x0 + w, y0 + j, C.ink); }
+        // the little tail toward the mascot
+        this.dot(x0 + 3, y0 + h + 1, C.ink); this.dot(x0 + 2, y0 + h + 2, C.ink); this.dot(x0 + 4, y0 + h, C.paper); this.dot(x0 + 3, y0 + h, C.paper);
+        this.text(e.text, x0 + 5, y0 + 6, EFFECT.heartDark, 12);
+      }
+    }
   }
 
   setTheme(theme) { this.T = palette(theme); this.bg = this.buildBackground(this.bodyBox); }
@@ -351,10 +406,10 @@ export class Scene {
         if (lump && X >= 0 && X < LW) px[Y * LW + X] = y === 8 ? T.star[0] : T.star[2];
       }
     }
-    const data = clip.data, base = frame * 240 * 220 * 4;
+    const data = clip.data, base = frame * 240 * 220 * 4, lift = this.lift(now);
     // (the clip is 240x220 native; it sits centred on the grid)
     for (let y = 0; y < 220; y++) {
-      const ly = this.bodyY + y;
+      const ly = this.bodyY + y - lift;
       if (ly < 0 || ly >= LH) continue;
       for (let x = 0; x < 240; x++) {
         const s = base + (y * 240 + x) * 4;
@@ -364,6 +419,7 @@ export class Scene {
       }
     }
     this.drawCard(now);
+    this.drawEffects(now);
     if (this.footer) { const n = Math.min(this.footer.length, 30); this.text(this.footer, Math.round((LW - n * FW) / 2), LH - 70, this.T.footer, 30); }
     // Upscale the grid to the 720x1280 camera frame.
     if (this.gridOnly) return px;

@@ -89,25 +89,25 @@ function demoJob() {
     stages: [
       {
         card: { kind: 'error', title: 'Build failed', command: 'npm run build', lines: ['Missing AUTH_SECRET', 'src/auth.ts:14'] },
-        line: "Hey! Your build just broke. auth.ts needs an AUTH_SECRET, and it isn't set. Want me to fix it?",
-        wait: 'Fix it?', ack: 'On it!', fix: step('fix'),
+        line: "Hiii! Um, so your build just broke. auth.ts lost its AUTH_SECRET. Want me to fix it for you?",
+        wait: 'Fix it?', ack: 'Yay! On it!', fix: step('fix'),
       },
       {
         card: { kind: 'approve', title: 'Can I push this?', command: 'git push origin main', lines: ['fix: load AUTH_SECRET', '12 tests passing'] },
-        line: 'Fixed! The build is green and all twelve tests pass. Can I commit it and push to main?',
-        wait: 'Push to main?', ack: 'Pushing it now.', fix: step('push'),
+        line: 'All fixed! Twelve tests, all green. Can I push it to main?',
+        wait: 'Push to main?', ack: 'Okie, pushing it!', fix: step('push'),
       },
       {
         card: { kind: 'approve', title: 'Ship to staging?', command: 'npm run deploy', lines: ['staging.acme-web.dev'] },
-        line: "It's on main. Want me to ship it to staging too?",
-        wait: 'Deploy?', ack: 'Shipping it!', fix: step('deploy'),
+        line: "It's on main! Ooh, can I ship it to staging too?",
+        wait: 'Deploy?', ack: 'Yay, shipping it!', fix: step('deploy'),
       },
     ],
     finalCard: { kind: 'done', title: 'Shipped', tests: { pass: 12, fail: 0 }, lines: ['Live on staging'] },
     lines: {
-      fixed: "It's live on staging. Nice work, bye!",
-      noAnswer: "No answer, so I'll stop here. Bye!",
-      bye: "Okay, I'll leave the rest to you. Bye!",
+      fixed: "It's live! We did it! Bye bye!",
+      noAnswer: "Aw, I missed you. I'll wait in your terminal. Bye bye!",
+      bye: "Okie, I'll leave the rest to you. Bye bye!",
     },
   };
 }

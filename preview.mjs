@@ -18,11 +18,12 @@ let callStartedAt = null;
 
 // What each scene puts on screen. The real call drives the same looks and cards.
 const SCENES = {
-  hello: { label: 'You call it', look: 'greeting', then: 'idle', card: null },
+  hello: { label: 'You call it', look: 'greeting', then: 'idle', card: null, react: { sparkles: 10, bubble: 'hi!' } },
+  yes: { label: 'You say yes', look: 'waiting', card: { kind: 'waiting', title: 'Push to main?' }, react: { hearts: 7, hop: true, bubble: 'yay!' } },
   approve: { label: 'It asks permission', look: 'waiting', card: { kind: 'approve', title: 'Can I do this?', command: 'git push origin main', lines: ['Push the login fix to GitHub'] } },
   failed: { label: 'Something broke', look: 'error', card: { kind: 'error', title: 'Tests failed', lines: ['auth.test.js: 2 failing', 'expected 200, got 401'] } },
   fixing: { label: 'Fixing it live', look: 'reading', card: { kind: 'reading', input: { file_path: 'src/auth/login.js' }, output: 'export async function login(user) {\n  const token = await sign(user);\n  return { token };\n}' } },
-  done: { label: 'All fixed', look: 'done', card: { kind: 'done', title: 'Fixed', tests: { pass: 6, fail: 0 }, lines: ['Login works again'] } },
+  done: { label: 'All fixed', look: 'done', card: { kind: 'done', title: 'Shipped', tests: { pass: 12, fail: 0 }, lines: ['Live on staging'] }, react: { hearts: 10, sparkles: 10, hop: true, bubble: 'we did it!' } },
 };
 
 let frames;
@@ -40,6 +41,8 @@ function mascotFor(theme, scene) {
     entry = { mascot, scene: s, since: Date.now() };
     mascots.set(key, entry);
   }
+  // Hearts and hops replay every few seconds so the preview keeps showing them.
+  if (entry.scene.react && Date.now() - (entry.reactedAt ?? 0) > 2600) { entry.mascot.react(entry.scene.react); entry.reactedAt = Date.now(); }
   // A greeting waves once, then settles; replay it every few seconds so the preview keeps showing it.
   if (entry.scene.then) {
     const t = Date.now() - entry.since;
@@ -101,12 +104,12 @@ async function elevenSample(personaId, voiceId) {
   if (!/^[A-Za-z0-9]{10,40}$/.test(voiceId ?? '')) throw Object.assign(new Error('unknown voice'), { status: 404 });
   const speed = Math.min(1.2, Math.max(0.7, Number(config().speed) || 1.1));
   mkdirSync(VOICE_CACHE, { recursive: true });
-  const file = join(VOICE_CACHE, `el-${voiceId}-${createHash('sha1').update(`${persona.sample}|${speed}`).digest('hex').slice(0, 12)}.mp3`);
+  const file = join(VOICE_CACHE, `el-${voiceId}-${createHash('sha1').update(`${persona.sample}|${speed}|cute`).digest('hex').slice(0, 12)}.mp3`);
   if (existsSync(file)) return readFileSync(file);
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
     method: 'POST', signal: AbortSignal.timeout(30000),
     headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ text: persona.sample, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true, speed } }),
+    body: JSON.stringify({ text: persona.sample, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.3, similarity_boost: 0.8, style: 0.55, use_speaker_boost: true, speed } }),
   });
   if (!res.ok) throw Object.assign(new Error(`ElevenLabs could not voice that (HTTP ${res.status})`), { status: 502 });
   const audio = Buffer.from(await res.arrayBuffer());

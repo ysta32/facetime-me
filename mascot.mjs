@@ -53,6 +53,9 @@ export class Mascot {
 
   theme(id) { this.scene.setTheme(id); }
 
+  /** A cute moment on top of whatever look is playing: hearts, sparkles, a speech bubble, a hop. */
+  react(options) { this.scene.react(options, this.now()); }
+
   footer(text) { this.scene.footer = text ?? ''; }
 
   isOnce(name) { return !this.frames[name].loop || PLAY_ONCE_OVERRIDE.has(name); }
