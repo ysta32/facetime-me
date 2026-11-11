@@ -40,6 +40,7 @@ function instructionsFor(job, persona) {
     'You are paused, waiting for permission to do one thing, described in the facts. You asked whether you may go ahead.',
     'If the developer clearly says yes, call the approve tool immediately and say nothing yourself. If they also say to always allow this kind of thing (for example "yes, always" or "don\'t ask again"), call approve with always set to true.',
     'If they say no, or anything unsure, call the deny tool with their reason and say nothing yourself. Never approve without a clear yes.',
+    'Never answer your own question. Until the developer has actually said yes out loud, never thank them, never say you are doing it, and never say you will go ahead.',
     'If they ask what it is or why, answer in one short sentence from the facts, then ask again whether it can go ahead.',
   );
   else lines.push('You cannot change anything from this call. If the developer is done or says goodbye, call the end_call tool and say nothing yourself.');
@@ -101,7 +102,7 @@ export default defineAgent({
 
     const session = new voice.AgentSession({
       llm: new realtime.RealtimeModel({
-        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, Number(settings.speed) || 1.2)), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
         // Semantic turn detection, eager so replies start fast; noise reduction for phone audio. The yes-check
         // in heardYes() is what stops noise from approving anything, so eagerness can stay high.
         turnDetection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true },
@@ -110,7 +111,8 @@ export default defineAgent({
     });
 
     const say = (text, toolChoice = 'none') => session.generateReply({
-      instructions: `Say exactly this, word for word, and nothing else: "${text}"`, allowInterruptions: false, toolChoice,
+      // Phrased so the model reads it as its own line to the developer, not a question put to it.
+      instructions: `Speak this line to the developer now, word for word, as your own words. It is not addressed to you, so do not answer or react to it, and add nothing: "${text}"`, allowInterruptions: false, toolChoice,
     });
     const speak = (instructions) => session.generateReply({ instructions, allowInterruptions: false, toolChoice: 'none' });
 
@@ -312,14 +314,18 @@ export default defineAgent({
       setPhase('explain');
       mascot.card(job.card ?? { kind: 'error', title: 'Something broke', lines: [job.summary ?? ''] });
       askedAt = Date.now();
-      await (job.lines.explain ? say(job.lines.explain) : speak(`${job.lines.explainPrompt} Start with exactly "${persona.lines.opener}" and speak in your personality.`)).waitForPlayout();
+      // One turn that explains and then asks: a separate scripted question was sometimes answered by the model itself.
+      const asks = job.canFix || job.approval;
+      const prompt = asks ? (job.lines.explainPrompt ?? '').replace(/\s*Do not ask anything[^.]*\.|\s*Do not offer anything\./g, '') : job.lines.explainPrompt;
+      await (job.lines.explain
+        ? say(asks ? `${job.lines.explain} ${job.lines.ask}` : job.lines.explain)
+        : speak(`${prompt} Start with exactly "${persona.lines.opener}" and speak in your personality.${asks ? ` Then end with exactly this question to the developer, word for word: "${job.lines.ask}". Ask it only once, and stop talking after it.` : ''}`)).waitForPlayout();
       if (!job.canFix && !job.approval) {
         await sleep(400);
         return wrapUp(job.lines.bye, 'notified');
       }
       setPhase('ask');
       mascot.card(job.approval ? { kind: 'waiting', title: 'Allow it?' } : { kind: 'waiting' });
-      await say(job.lines.ask, 'none').waitForPlayout();
       lastReplyAsked = true;
       setPhase('open');
       armSilence();

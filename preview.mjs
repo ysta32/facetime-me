@@ -56,14 +56,14 @@ async function voiceSample(personaId, voice, style) {
   if (!persona) throw Object.assign(new Error('unknown personality'), { status: 404 });
   voice = VOICES.includes(voice) ? voice : persona.voice;
   mkdirSync(VOICE_CACHE, { recursive: true });
-  const key = createHash('sha1').update(`${persona.sample}|${persona.tone}|${voice}`).digest('hex').slice(0, 12);
+  const key = createHash('sha1').update(`${persona.sample}|${persona.tone}|${voice}|${config().speed ?? 1.2}|brisk`).digest('hex').slice(0, 12);
   const file = join(VOICE_CACHE, `${personaId}-${voice}-${key}.mp3`);
   if (existsSync(file)) return readFileSync(file);
   if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('No OpenAI key yet: run facetime-me --setup'), { status: 400 });
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST', signal: AbortSignal.timeout(30000),
     headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice, input: persona.sample, instructions: persona.tone, response_format: 'mp3' }),
+    body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice, input: persona.sample, instructions: `${persona.tone} Talk at a brisk, quick pace.`, speed: Math.min(1.5, Math.max(0.8, Number(config().speed) || 1.2)), response_format: 'mp3' }),
   });
   if (!response.ok) throw Object.assign(new Error(`OpenAI could not voice "${voice}" (HTTP ${response.status})`), { status: 502 });
   const audio = Buffer.from(await response.arrayBuffer());
