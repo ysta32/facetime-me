@@ -26,6 +26,12 @@ function instructionsFor(job) {
     'If they say no, or want to handle it themselves, call the end_call tool and say nothing yourself.',
     'If they ask something else, answer in one short sentence and then ask again whether you should fix it.',
   );
+  else if (job.approval) lines.push(
+    'Claude Code is paused, waiting for permission to do one thing, described in the facts. You asked whether it may go ahead.',
+    'If the developer clearly says yes, call the approve tool immediately and say nothing yourself. If they also say to always allow this kind of thing (for example "yes, always" or "don\'t ask again"), call approve with always set to true.',
+    'If they say no, or anything unsure, call the deny tool with their reason and say nothing yourself. Never approve without a clear yes.',
+    'If they ask what it is or why, answer in one short sentence from the facts, then ask again whether it can go ahead.',
+  );
   else lines.push('You cannot change anything from this call. If the developer is done or says goodbye, call the end_call tool and say nothing yourself.');
   if (job.inbound) lines.push('The developer FaceTimed you themselves. Greet them, then chat casually and answer questions in a sentence or two. You have no terminal access on this call.');
   if (job.demo) lines.push('This is a scripted demo. Never improvise, and never add words to the lines you are given.');
@@ -75,7 +81,7 @@ export default defineAgent({
     const clearSilence = () => { if (silenceTimer) clearTimeout(silenceTimer); silenceTimer = null; };
     const armSilence = () => {
       clearSilence();
-      if (!ended && phase === 'open' && job.canFix) silenceTimer = setTimeout(() => wrapUp(job.lines.noAnswer, 'no_answer').catch(() => {}), SILENCE_MS);
+      if (!ended && phase === 'open' && (job.canFix || job.approval)) silenceTimer = setTimeout(() => wrapUp(job.lines.noAnswer, 'no_answer').catch(() => {}), SILENCE_MS);
     };
 
     const session = new voice.AgentSession({
@@ -172,6 +178,25 @@ export default defineAgent({
         execute: async () => { void wrapUp(job.lines.bye, 'declined').catch(() => {}); return undefined; },
       }),
     };
+    if (job.approval) {
+      // The hook that started this call reads result.decision and hands it to Claude Code.
+      const decide = (decision, line, outcome) => {
+        if (result.decision) return;
+        result.decision = decision; save();
+        void wrapUp(line, outcome).catch(() => {});
+      };
+      tools.approve = llm.tool({
+        description: 'Let Claude Code go ahead. Use only after a clear yes. Set always to true if they said to always allow this kind of thing.',
+        parameters: z.object({ always: z.boolean().optional() }),
+        execute: async ({ always }) => { decide({ behavior: 'allow', always: always === true }, job.lines.approved, 'approved'); return undefined; },
+      });
+      tools.deny = llm.tool({
+        description: 'Stop Claude Code from doing it. Use when the developer says no or is unsure.',
+        parameters: z.object({ reason: z.string().optional() }),
+        execute: async ({ reason }) => { decide({ behavior: 'deny', reason: reason ?? 'Declined on FaceTime' }, job.lines.denied, 'denied'); return undefined; },
+      });
+      delete tools.end_call;
+    }
     if (job.canFix) tools.start_fix = llm.tool({
       description: 'Start fixing the problem. Use as soon as the developer says yes.',
       parameters: z.object({}),
@@ -253,12 +278,12 @@ export default defineAgent({
       setPhase('explain');
       mascot.card(job.card ?? { kind: 'error', title: 'Something broke', lines: [job.summary ?? ''] });
       await (job.lines.explain ? say(job.lines.explain) : speak(job.lines.explainPrompt)).waitForPlayout();
-      if (!job.canFix) {
+      if (!job.canFix && !job.approval) {
         await sleep(400);
         return wrapUp(job.lines.bye, 'notified');
       }
       setPhase('ask');
-      mascot.card({ kind: 'waiting' });
+      mascot.card(job.approval ? { kind: 'waiting', title: 'Allow it?' } : { kind: 'waiting' });
       await say(job.lines.ask, 'none').waitForPlayout();
       lastReplyAsked = true;
       setPhase('open');

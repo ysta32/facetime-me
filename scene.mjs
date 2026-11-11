@@ -79,6 +79,7 @@ function describe(card) {
     case 'usingTool': return { title: 'Using a tool', icon: 'tool', rows: 1 };
     case 'thinking': return { title: card.title ?? 'Thinking', icon: 'thinking', rows: 1 };
     case 'error': return { title: card.title ?? 'Something broke', icon: 'error', rows: Math.min(4, 1 + (card.lines?.length ?? 0)) };
+    case 'approve': return { title: card.title ?? 'Allow this?', icon: 'waiting', rows: Math.min(4, (card.command ? 1 : 0) + (card.lines?.length ?? 0)) || 1 };
     case 'waiting': return { title: card.title ?? 'Want me to fix it?', icon: 'waiting', rows: card.buttons === false ? 1 : 2 };
     case 'done': return { title: card.title ?? 'Fixed', icon: 'done', rows: Math.min(4, wrap((card.lines ?? []).map(l => String(l).replace(/`/g, '')), 24).length + (card.tests ? 1 : 0)) || 1 };
     default: return { title: cmd || card.kind, icon: 'tool', rows: 1 };
@@ -269,6 +270,12 @@ export class Scene {
       case 'error': {
         if (card.command) this.text(`$ ${card.command}`, x, row(0), C.ink, chars);
         (card.lines ?? []).map(l => String(l).trim()).filter(Boolean).slice(0, 3).forEach((line, k) => this.text(line, x, row(k + 1), C.red, chars));
+        break;
+      }
+      case 'approve': {
+        let k = 0;
+        if (card.command) this.text(`$ ${card.command}`, x, row(k++), C.ink, chars);
+        (card.lines ?? []).map(l => String(l).trim()).filter(Boolean).slice(0, 4 - k).forEach(line => this.text(line, x, row(k++), C.dim, chars));
         break;
       }
       case 'waiting': {

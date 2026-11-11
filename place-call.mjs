@@ -19,7 +19,7 @@ const TERMINAL = new Set(['ended', 'failed', 'rejected']);
 const lk = process.env.LIVEKIT_URL.replace(/^wss:/, 'https:'), key = process.env.LIVEKIT_API_KEY, secret = process.env.LIVEKIT_API_SECRET;
 const rooms = new RoomServiceClient(lk, key, secret), dispatch = new AgentDispatchClient(lk, key, secret);
 
-const room = `cc-${randomBytes(5).toString('hex')}`, bridgeIdentity = `chert-bridge-${room}`;
+const room = job.room ?? `cc-${randomBytes(5).toString('hex')}`, bridgeIdentity = `chert-bridge-${room}`;
 const WARM = join(STATE, 'warm-worker.json');
 let worker = null, callId = null;
 
@@ -49,6 +49,8 @@ function summaryText(call, result, failure) {
 }
 
 async function sendSummary(call, result, failure) {
+  // An approval is answered on the call or falls back to the terminal; a text afterwards adds nothing.
+  if (job.approval) return;
   const text = summaryText(call, result, failure);
   try {
     await chert('POST', '/shared-messages', { line_id: lineId, recipient: phone, text }, { idempotencyKey: `summary-${room}` });

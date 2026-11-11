@@ -75,10 +75,12 @@ export async function listen() {
 
   // 3. Connect it to the line and relay what matters.
   say('connecting to your Chert line…');
+  const devLog = openSync(DEV_LOG, 'w', 0o600);
+  let line = null, warned = false;
+  const connect = () => {
   const dev = spawn(CHERT, ['dev', '--agent', AGENT_NAME, '--json'], { cwd: HOME, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(dev);
-  const devLog = openSync(DEV_LOG, 'w', 0o600);
-  let line = null, buffer = '';
+  let buffer = '';
   dev.stdout.on('data', chunk => {
     writeFileSync(devLog, chunk);
     buffer += chunk;
@@ -87,12 +89,21 @@ export async function listen() {
       const raw = buffer.slice(0, at); buffer = buffer.slice(at + 1);
       let record; try { record = JSON.parse(raw); } catch { continue; }
       if (record.code === 'dev_ready') line = record.line;
-      else if (record.code === 'agent_warm') say(`ready. FaceTime ${line ?? 'your line'} to talk to the mascot. Ctrl+C to stop.`);
+      else if (record.code === 'agent_warm') { if (!warned) say(`ready. FaceTime ${line ?? 'your line'} to talk to the mascot. Ctrl+C to stop.`); warned = true; }
+      else if (record.code === 'reconnecting') { if (warned) say('lost the connection to Chert (network or sleep), reconnecting…'); warned = false; }
       else if (record.code === 'runtime_observation' || record.code === 'line_state' || record.code === 'dev_connected') continue;
       else if (/call/.test(record.code ?? '')) say(record.message ?? record.code);
       else if (record.ok === false || record.action) say(`${record.message ?? record.code}${record.action ? ` → ${record.action}` : ''}`);
     }
   });
   dev.stderr.on('data', chunk => writeFileSync(devLog, chunk));
-  dev.on('exit', code => { if (!stopping) { say(`chert dev stopped (exit ${code}). Log: ${DEV_LOG}`); stop(code || 1); } });
+  dev.on('exit', code => {
+    children.splice(children.indexOf(dev), 1);
+    if (stopping) return;
+    // Exit 6 is network/server (Wi-Fi dropped, the Mac slept): keep trying instead of leaving the line dark.
+    if (code === 6) { say('Chert is unreachable; trying again in 30 s (Ctrl+C to stop).'); warned = false; setTimeout(() => { if (!stopping) connect(); }, 30000); return; }
+    say(`chert dev stopped (exit ${code}). Log: ${DEV_LOG}`); stop(code || 1);
+  });
+  };
+  connect();
 }

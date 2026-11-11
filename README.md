@@ -22,7 +22,7 @@ That one command walks you through everything and can be re-run any time (finish
    Chert gives you a FaceTime line (free trial: 50 minutes over 24 hours)
 3. asks for your LiveKit and OpenAI keys. They're typed hidden and saved only to `.env.local` (mode 600)
 4. runs `chert doctor` to check the line, keys and model
-5. *optional:* adds Claude Code hooks so the mascot calls **you**
+5. *optional:* adds Claude Code hooks so the mascot calls **you** when something breaks, and for approvals
 6. puts a `facetime-me` command on your PATH
 
 Then, in any terminal:
@@ -32,6 +32,21 @@ facetime-me --listen
 ```
 
 and FaceTime the number it prints. Ctrl+C frees the line.
+
+## Approve Claude Code from FaceTime
+
+With the hooks installed (setup, last step), a permission prompt doesn't wait silently in your terminal anymore.
+**Your phone rings.** The mascot shows the exact command on its screen card and asks "Okay to go ahead?":
+
+- **"Yes"** lets it run, and **"yes, always"** allows that kind of call for the rest of the session.
+  **"No"** blocks it and Claude Code is told not to retry.
+- **Bypass mode works too.** If you run `claude --dangerously-skip-permissions`, nothing prompts, so
+  `approve.mjs` decides what's risky: `rm`, `sudo`, `git push`/`reset --hard`, deploys, `npm publish`,
+  `curl | sh`, SQL drops, writes outside the project or to `.env`/`.ssh`, and sending, deleting or publishing
+  through MCP apps. Those ring you; everything else runs untouched. Add your own pattern with
+  `"approvals": {"alsoAsk": "regex"}` in `config.json`.
+- **Nothing gets stuck.** No answer, a failed call, or a busy line puts the normal terminal prompt back.
+- `facetime-me --off` pauses alerts and approvals, and `"approvals": {"enabled": false}` turns off approvals only.
 
 ## Commands
 
@@ -55,7 +70,7 @@ your iPhone ──FaceTime──▶ Chert's Mac ──LiveKit room──▶ agen
   `StopFailure` and `Notification`. On a real problem it places an outbound call (`place-call.mjs`),
   explains what broke, and if you say "yes, fix it" runs a headless `claude -p` fork of your session
   while the mascot mirrors its live tool calls (`activity.mjs`). There's a 10-minute cooldown and it never
-  calls twice about the same error. Outbound calls need a Chert project API key (setup asks for it).
+  calls twice about the same error. Outbound calls use your `chert login` session, so no extra key is needed.
 
 ## Using your own mascot art
 

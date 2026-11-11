@@ -64,6 +64,8 @@ function jobFromHook(hook) {
   if (event === 'Notification') {
     const kind = hook.notification_type;
     if (!['permission_prompt', 'elicitation_dialog', 'agent_needs_input'].includes(kind)) return null;
+    // Permission prompts are answered on their own call by the PermissionRequest hook (approve.mjs).
+    if (kind === 'permission_prompt' && readJson(join(HOME, 'config.json'), {}).approvals?.enabled !== false) return null;
     return {
       kind: 'waiting', canFix: false, look: 'waiting', project, card: { kind: 'waiting', title: 'Claude Code needs you', buttons: false, text: oneLine(hook.message, 48) }, dedupeKey: fingerprint(`${project}|${session}|${kind}|${hook.message}`),
       context: `Project: ${project}\nClaude Code is waiting on the developer. Its notice says: ${oneLine(hook.message, 240)}`,
@@ -126,6 +128,14 @@ async function fromHook() {
   // A raw newline or tab inside a string (seen 2026-11-05) breaks strict JSON; escape stray control characters and retry.
   try { hook = JSON.parse(raw || '{}'); }
   catch { hook = JSON.parse(escapeInStrings(raw)); }
+  // Approvals answer Claude Code synchronously: print the decision, or nothing to leave it alone.
+  if (hook.hook_event_name === 'PreToolUse' || hook.hook_event_name === 'PermissionRequest') {
+    if (offSwitch() || process.env.FACETIME_ME_DEMO === '1') return;
+    const { approvalFromHook } = await import(pathToFileURL(join(HOME, 'approve.mjs')).href);
+    const out = await approvalFromHook(hook);
+    if (out) process.stdout.write(JSON.stringify(out));
+    return;
+  }
   // Subagents retry their own failures, and nothing a subagent does is waiting on a person.
   if (hook.agent_id) return;
   const demoRun = process.env.FACETIME_ME_DEMO === '1';

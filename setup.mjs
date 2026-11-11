@@ -158,29 +158,31 @@ export async function setup(argv = []) {
 
 async function installAlerts() {
   const current = config();
-  const phone = await ask(`  Your phone number, as verified with Chert (+1…)${current.phone ? ` [${current.phone}]` : ''}: `, { fallback: current.phone ?? '' });
+  const phone = await ask(`  Your phone number, the one you verified with Chert (+1…)${current.phone ? ` [${current.phone}]` : ''}: `, { fallback: current.phone ?? '' });
   if (!/^\+\d{8,15}$/.test(phone)) fail('use the full number with country code, like +14155550123.');
   writeJson(CONFIG_PATH, { ...config(), phone });
-  if (!readEnv().CHERT_API_KEY) {
-    console.log(`  Outbound calls use a project API key: https://app.trychert.com/developer (owner only).`);
-    const key = await ask('  CHERT_API_KEY (ftk_…, hidden): ', { secret: true });
-    if (!key.startsWith('ftk_')) fail('that is not a Chert project key (they start with ftk_).');
-    writeEnv({ CHERT_API_KEY: key });
-  }
+  // Outbound calls use the `chert login` session from step 2; a CHERT_API_KEY in .env.local also works.
   const path = join(homedir(), '.claude', 'settings.json');
   const settings = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   if (existsSync(path)) copyFileSync(path, `${path}.bak-facetime-me`);
-  const hook = { type: 'command', command: BIN, async: true };
-  const wanted = [['PostToolUseFailure', 'Bash'], ['StopFailure', undefined], ['Notification', 'permission_prompt|elicitation_dialog|agent_needs_input']];
+  // Alerts run in the background; approvals hold Claude Code until you answer (or fall back to the terminal).
+  const alert = { type: 'command', command: BIN, async: true };
+  const approval = { type: 'command', command: BIN, timeout: 300 };
+  const wanted = [
+    ['PostToolUseFailure', 'Bash', alert], ['StopFailure', undefined, alert], ['Notification', 'permission_prompt|elicitation_dialog|agent_needs_input', alert],
+    ['PermissionRequest', undefined, approval], ['PreToolUse', 'Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*', approval],
+  ];
   settings.hooks ??= {};
-  for (const [event, matcher] of wanted) {
+  for (const [event, matcher, hook] of wanted) {
     const list = settings.hooks[event] ??= [];
     if (list.some(entry => (entry.hooks ?? []).some(h => String(h.command).includes('facetime-me')))) continue;
     list.push(matcher ? { matcher, hooks: [hook] } : { hooks: [hook] });
   }
   writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
   rmSync(join(STATE, 'off'), { force: true });
+  writeJson(CONFIG_PATH, { ...config(), approvals: { enabled: true } });
   ok(`hooks added to ${path} (backup: settings.json.bak-facetime-me). Pause anytime: facetime-me --off`);
+  console.log('  Permission prompts now ring you. In bypass mode (--dangerously-skip-permissions), risky commands do too.');
 }
 
 /** Puts `facetime-me` on PATH with npm link; if that needs sudo, says how to run it instead. */
