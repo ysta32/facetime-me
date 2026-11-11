@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { cli, defineAgent, llm, ServerOptions, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-openai';
+import * as elevenlabs from '@livekit/agents-plugin-elevenlabs';
 import { LocalVideoTrack, TrackPublishOptions, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
 import { z } from 'zod';
 import { AGENT_NAME, chert, config, demoEvent, loadSecrets, resultPath, writeJson } from './lib.mjs';
@@ -14,6 +15,9 @@ import { FixStream } from './activity.mjs';
 import { testCounts } from './scene.mjs';
 
 loadSecrets();
+
+// ElevenLabs "Will": young, relaxed, friendly. Change it with "elevenVoice" in config.json or in the preview.
+export const ELEVEN_DEFAULT_VOICE = 'bIHbv24MWmeRgasZH58o';
 
 const SILENCE_MS = 14000, CALL_CAP_MS = 4 * 60000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -100,9 +104,16 @@ export default defineAgent({
       if (!ended && phase === 'open' && (job.canFix || job.approval)) silenceTimer = setTimeout(() => wrapUp(job.lines.noAnswer, 'no_answer').catch(() => {}), SILENCE_MS);
     };
 
+    // With an ElevenLabs key, the Realtime model only writes text and ElevenLabs Flash speaks it.
+    const eleven = Boolean(process.env.ELEVENLABS_API_KEY) && settings.tts !== 'openai';
+    const speed = Number(settings.speed) || 1.1;
     const session = new voice.AgentSession({
+      ...(eleven ? { tts: new elevenlabs.TTS({
+        voiceId: settings.elevenVoice || ELEVEN_DEFAULT_VOICE, model: 'eleven_flash_v2_5',
+        voiceSettings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true, speed: Math.min(1.2, Math.max(0.7, speed)) },
+      }) } : {}),
       llm: new realtime.RealtimeModel({
-        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, Number(settings.speed) || 1.1)), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+        model: 'gpt-realtime', ...(eleven ? { modalities: ['text'] } : { voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) }), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
         // Semantic turn detection, eager so replies start fast; noise reduction for phone audio. The yes-check
         // in heardYes() is what stops noise from approving anything, so eagerness can stay high.
         turnDetection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true },
@@ -110,7 +121,8 @@ export default defineAgent({
       }),
     });
 
-    const say = (text, toolChoice = 'none') => session.generateReply({
+    // ElevenLabs reads a fixed line straight out, word for word, with no model turn in between.
+    const say = (text, toolChoice = 'none') => eleven ? session.say(text, { allowInterruptions: false }) : session.generateReply({
       // Phrased so the model reads it as its own line to the developer, not a question put to it.
       instructions: `Speak this line to the developer now, word for word, as your own words. It is not addressed to you, so do not answer or react to it, and add nothing: "${text}"`, allowInterruptions: false, toolChoice,
     });

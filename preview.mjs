@@ -73,10 +73,41 @@ async function voiceSample(personaId, voice, style) {
   return audio;
 }
 
+const ELEVEN_DEFAULT = 'bIHbv24MWmeRgasZH58o';
+let elevenVoices = null;
+async function elevenList() {
+  if (!process.env.ELEVENLABS_API_KEY) return null;
+  if (elevenVoices) return elevenVoices;
+  const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY }, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw Object.assign(new Error(`ElevenLabs would not list voices (HTTP ${res.status})`), { status: 502 });
+  const { voices } = await res.json();
+  elevenVoices = voices.map(v => ({ id: v.voice_id, name: v.name.split(' - ')[0], about: [v.labels?.gender, v.labels?.age, v.labels?.accent, v.labels?.descriptive ?? v.labels?.description].filter(Boolean).join(', ') }));
+  return elevenVoices;
+}
+
+/** The personality's sample line in an ElevenLabs voice (Flash, the model the calls use), cached. */
+async function elevenSample(personaId, voiceId) {
+  const persona = PERSONAS[personaId] ?? PERSONAS[DEFAULT_PERSONA];
+  if (!/^[A-Za-z0-9]{10,40}$/.test(voiceId ?? '')) throw Object.assign(new Error('unknown voice'), { status: 404 });
+  const speed = Math.min(1.2, Math.max(0.7, Number(config().speed) || 1.1));
+  mkdirSync(VOICE_CACHE, { recursive: true });
+  const file = join(VOICE_CACHE, `el-${voiceId}-${createHash('sha1').update(`${persona.sample}|${speed}`).digest('hex').slice(0, 12)}.mp3`);
+  if (existsSync(file)) return readFileSync(file);
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+    method: 'POST', signal: AbortSignal.timeout(30000),
+    headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ text: persona.sample, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true, speed } }),
+  });
+  if (!res.ok) throw Object.assign(new Error(`ElevenLabs could not voice that (HTTP ${res.status})`), { status: 502 });
+  const audio = Buffer.from(await res.arrayBuffer());
+  writeFileSync(file, audio);
+  return audio;
+}
+
 function choices() {
   const c = config();
   const personality = PERSONAS[c.personality] || (c.personality === 'custom' && c.customStyle) ? c.personality : DEFAULT_PERSONA;
-  return { theme: THEMES[c.theme] ? c.theme : 'night', personality, voice: c.voice ?? null, customStyle: c.customStyle ?? '' };
+  return { theme: THEMES[c.theme] ? c.theme : 'night', personality, voice: c.voice ?? null, customStyle: c.customStyle ?? '', elevenVoice: c.elevenVoice ?? ELEVEN_DEFAULT, eleven: Boolean(process.env.ELEVENLABS_API_KEY) && c.tts !== 'openai' };
 }
 
 async function handle(req, res) {
@@ -106,8 +137,19 @@ async function handle(req, res) {
       return res.end(audio);
     } catch (error) { return json(res, error.status ?? 500, { error: error.message }); }
   }
+  if (url.pathname === '/api/eleven/voices') {
+    try { return json(res, 200, { voices: await elevenList() }); } catch (error) { return json(res, error.status ?? 500, { error: error.message }); }
+  }
+  if (url.pathname === '/api/eleven/voice') {
+    try {
+      const audio = await elevenSample(url.searchParams.get('persona'), url.searchParams.get('voice'));
+      res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' });
+      return res.end(audio);
+    } catch (error) { return json(res, error.status ?? 500, { error: error.message }); }
+  }
   if (url.pathname === '/api/choose' && req.method === 'POST') {
     const body = await readBody(req), next = config();
+    if (typeof body.elevenVoice === 'string' && /^[A-Za-z0-9]{10,40}$/.test(body.elevenVoice)) next.elevenVoice = body.elevenVoice;
     if (body.theme && THEMES[body.theme]) next.theme = body.theme;
     if (body.personality === 'custom' && String(body.customStyle ?? '').trim()) { next.personality = 'custom'; next.customStyle = String(body.customStyle).trim().slice(0, 400); delete next.voice; }
     else if (body.personality && PERSONAS[body.personality]) { next.personality = body.personality; delete next.voice; }

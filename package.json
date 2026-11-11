@@ -4,11 +4,12 @@
   "type": "module",
   "dependencies": {
     "@livekit/agents": "1.8.0",
+    "@livekit/agents-plugin-elevenlabs": "1.8.0",
     "@livekit/agents-plugin-openai": "1.8.0",
     "@livekit/rtc-node": "0.13.35",
+    "@trychert/facetime": "0.1.0-beta.19",
     "livekit-server-sdk": "^2.13.0",
-    "zod": "^3.25.76",
-    "@trychert/facetime": "0.1.0-beta.19"
+    "zod": "^3.25.76"
   },
   "description": "FaceTime your coding agent. A pixel mascot answers on a real Apple line (via Chert), and can call you when Claude Code breaks.",
   "license": "MIT",

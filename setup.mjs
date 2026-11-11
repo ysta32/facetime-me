@@ -215,7 +215,26 @@ function linkCommand() {
 if (process.argv[1] && process.argv[1].endsWith('setup.mjs')) await setup(process.argv.slice(2));
 
 /** `facetime-me --key`: saves a new Chert project API key (hidden), after checking Chert accepts it. */
+/** `facetime-me --key elevenlabs`: saves an ElevenLabs key so calls speak with ElevenLabs voices. */
+export async function setElevenLabsKey() {
+  let key;
+  if (process.stdin.isTTY) {
+    console.log('Make a key at https://elevenlabs.io/app/settings/api-keys (needs Text to Speech and Voices read).');
+    key = await ask('ELEVENLABS_API_KEY (hidden): ', { secret: true });
+  } else {
+    let raw = '';
+    for await (const chunk of process.stdin) raw += chunk;
+    key = raw.trim();
+  }
+  if (!key) fail('no key given. Copy it from https://elevenlabs.io/app/settings/api-keys, then: pbpaste | facetime-me --key elevenlabs');
+  const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(15000) }).catch(() => null);
+  if (!res?.ok) fail(`ElevenLabs rejected that key${res ? ` (HTTP ${res.status})` : ''}. Make sure it can read voices and use Text to Speech.`);
+  writeEnv({ ELEVENLABS_API_KEY: key });
+  ok('saved to .env.local. Calls now speak with ElevenLabs. Pick a voice in facetime-me --preview.');
+}
+
 export async function setKey() {
+  if (process.argv[3] === 'elevenlabs') return setElevenLabsKey();
   const projectId = config().projectId;
   if (!projectId) fail('not set up yet. Run: facetime-me --setup');
   let key;

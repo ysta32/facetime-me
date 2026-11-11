@@ -21,6 +21,8 @@
   html, body { margin: 0; }
   body { background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--text); -webkit-font-smoothing: antialiased; }
   button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  .hint code { font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
   .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 56px; align-items: start; }
@@ -132,6 +134,13 @@
       <p class="hint" id="voiceHint">Each personality comes with a voice. Pick a different one here and hear it with the same lines.</p>
       <div class="voices" id="voices" role="group" aria-labelledby="voice-h"></div>
       <div class="save-row"><button class="btn primary" id="useVoice">Use this voice</button><span class="note" id="voiceNote"></span></div>
+    </section>
+
+    <section aria-labelledby="el-h">
+      <h2 id="el-h">ElevenLabs voice</h2>
+      <p class="hint" id="elHint">Loading your ElevenLabs voices…</p>
+      <div class="voices" id="elVoices" role="group" aria-labelledby="el-h"></div>
+      <div class="save-row" id="elSave" hidden><button class="btn primary" id="useEl">Use this voice</button><span class="note" id="elNote"></span></div>
     </section>
 
     <section aria-labelledby="bg-h">
@@ -259,6 +268,42 @@ async function choose(change) {
 }
 
 $('useVoice').onclick = () => choose({ personality: state.persona, customStyle: state.customStyle, voice: voiceOf() }).then(() => { $('voiceNote').textContent = `Saved. ${persona().name} will use ${voiceOf()} on your next call.`; });
+// ElevenLabs: listed from your own account; the chosen one speaks on every call while the key is set.
+let elPick = null;
+async function loadEleven() {
+  let voices;
+  try { voices = (await (await api('/api/eleven/voices')).json()).voices; }
+  catch (error) { $('elHint').textContent = error.message; return; }
+  if (!voices) { $('elHint').innerHTML = 'Not connected yet. Copy your ElevenLabs API key, then run <code>pbpaste | facetime-me --key elevenlabs</code> in Terminal and reload this page.'; return; }
+  $('elHint').textContent = 'Calls speak with this voice and the personality above. Press a voice to hear it.';
+  $('elSave').hidden = false;
+  elPick = state.chosen.elevenVoice;
+  const paint = () => {
+    for (const b of $('elVoices').children) b.setAttribute('aria-pressed', String(b.dataset.id === elPick));
+    const saved = elPick === state.chosen.elevenVoice;
+    $('useEl').disabled = saved; $('useEl').textContent = saved ? 'On your calls' : 'Use this voice';
+  };
+  for (const v of voices) {
+    const b = document.createElement('button');
+    b.dataset.id = v.id;
+    b.textContent = v.name;
+    if (v.about) { const sm = document.createElement('small'); sm.textContent = ` ${v.about}`; b.append(sm); }
+    b.onclick = async () => {
+      elPick = v.id; paint();
+      if (audio) { audio.pause(); audio = null; }
+      $('elNote').className = 'note'; $('elNote').textContent = 'Getting the sample…';
+      try {
+        const blob = await (await api(`/api/eleven/voice?persona=${state.persona === 'custom' ? 'classic' : state.persona}&voice=${v.id}`)).blob();
+        $('elNote').textContent = ''; audio = new Audio(URL.createObjectURL(blob)); await audio.play();
+      } catch (error) { $('elNote').className = 'note error'; $('elNote').textContent = error.message; }
+    };
+    $('elVoices').append(b);
+  }
+  paint();
+  $('useEl').onclick = () => choose({ elevenVoice: elPick }).then(() => { paint(); $('elNote').textContent = 'Saved for your next call.'; });
+}
+(function waitForOptions() { state.options ? loadEleven() : setTimeout(waitForOptions, 150); })();
+
 $('useTheme').onclick = () => choose({ theme: state.theme }).then(() => { $('themeNote').textContent = 'Saved for your next call.'; });
 $('showCut').onchange = e => $('phone').classList.toggle('show-cut', e.target.checked);
 

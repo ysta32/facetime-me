@@ -48,6 +48,10 @@ With the hooks installed (setup, last step), a permission prompt doesn't wait si
 - **Nothing gets stuck.** No answer, a failed call, or a busy line puts the normal terminal prompt back.
 - `facetime-me --off` pauses alerts and approvals, and `"approvals": {"enabled": false}` turns off approvals only.
 
+## ElevenLabs voices (optional)
+
+Copy an ElevenLabs API key, then run `pbpaste | facetime-me --key elevenlabs`. Calls then speak with ElevenLabs Flash instead of OpenAI's voices. Pick the voice in `facetime-me --preview`. To go back to OpenAI's voices, set `"tts": "openai"` in config.json.
+
 ## Personality, voice and background
 
 ```sh
