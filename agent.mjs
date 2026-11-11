@@ -109,7 +109,7 @@ export default defineAgent({
     const speed = Number(settings.speed) || 1.1;
     const session = new voice.AgentSession({
       ...(eleven ? { tts: new elevenlabs.TTS({
-        voiceId: settings.elevenVoice || ELEVEN_DEFAULT_VOICE, model: 'eleven_flash_v2_5',
+        apiKey: process.env.ELEVENLABS_API_KEY, voiceId: settings.elevenVoice || ELEVEN_DEFAULT_VOICE, model: 'eleven_flash_v2_5',
         voiceSettings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true, speed: Math.min(1.2, Math.max(0.7, speed)) },
       }) } : {}),
       llm: new realtime.RealtimeModel({
