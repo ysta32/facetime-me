@@ -102,10 +102,10 @@ export async function approvalFromHook(hook) {
   const job = {
     kind: 'approval', approval: true, canFix: false, look: 'waiting', project, room, dedupeKey: null,
     card: { kind: 'approve', title: 'Allow this?', ...card },
-    context: `Project: ${project}\nClaude Code wants to ${what}\nWhy it needs you: ${why}${hook.tool_input?.description ? `\nClaude's own description: ${oneLine(hook.tool_input.description, 200)}` : ''}`,
+    context: `Project: ${project}\nWhat you (Claude Code) want to do: ${what}\nWhy it needs you: ${why}${hook.tool_input?.description ? `\nYour own description of it: ${oneLine(hook.tool_input.description, 200)}` : ''}`,
     summary: `${project}: Claude Code wants to ${oneLine(what, 160)}`,
     lines: {
-      explainPrompt: 'In ONE short spoken sentence of under 20 words, starting with "Hey,", say what Claude Code wants to do, in plain words, using only the facts. Do not read the command out in full. Do not ask anything yet.',
+      explainPrompt: 'In ONE short spoken sentence of under 20 words, say in the first person what you want to do ("I want to..."), in plain words, using only the facts. Do not read the command out in full. Do not ask anything yet.',
       ask: 'Okay to go ahead?',
       approved: 'Okay, going ahead.',
       denied: "Okay, I'll stop it.",

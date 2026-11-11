@@ -25,9 +25,9 @@ export const LOOK = {
 const PLAY_ONCE_OVERRIDE = new Set(['greeting']);
 
 export class Mascot {
-  constructor({ now = Date.now, onChange = () => {} } = {}) {
-    this.frames = loadFrames();
-    this.scene = new Scene({ body: bodyBox(this.frames[LOOK.idle]) });
+  constructor({ now = Date.now, onChange = () => {}, theme, frames } = {}) {
+    this.frames = frames ?? loadFrames();
+    this.scene = new Scene({ body: bodyBox(this.frames[LOOK.idle]), theme });
     this.now = now;
     this.onChange = onChange;
     this.look = null;
@@ -50,6 +50,8 @@ export class Mascot {
 
   /** Adds facts to the card already showing, e.g. a command's output once it returns. */
   updateCard(patch) { this.scene.update(patch); }
+
+  theme(id) { this.scene.setTheme(id); }
 
   footer(text) { this.scene.footer = text ?? ''; }
 

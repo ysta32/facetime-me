@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Call Screen Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Silkscreen&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #D5DBE6; --surface: #E9EDF4; --ink: #1C2340; --muted: #59617F; --line: #B5BED1;
+    --accent: #E88C40; --ok: #2E7D57; --bezel: #1A1F33;
+    --pixel: 'Silkscreen', ui-monospace, monospace; --text: 'Atkinson Hyperlegible', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #141A2B; --surface: #1D2438; --ink: #E5E9F3; --muted: #98A1BE; --line: #313A55; --bezel: #070A14; }
+  }
+  :root[data-theme="dark"] { --bg: #141A2B; --surface: #1D2438; --ink: #E5E9F3; --muted: #98A1BE; --line: #313A55; --bezel: #070A14; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--text); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 56px; align-items: start; }
+  .page > * { min-width: 0; }
+  header { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font: 400 28px/1.1 var(--pixel); margin: 0; letter-spacing: 0; }
+  header p { margin: 0; color: var(--muted); max-width: 52ch; }
+  h2 { font: 700 22px/1.2 var(--text); margin: 0 0 4px; }
+  .hint { color: var(--muted); margin: 0 0 16px; font-size: 15px; }
+
+  /* The phone: the one loud thing on the page. */
+  .stage { position: sticky; top: 24px; display: grid; justify-items: center; gap: 16px; }
+  .phone { position: relative; width: min(100%, 340px); aspect-ratio: 9 / 19.5; border-radius: 48px; background: var(--bezel); padding: 12px; box-shadow: 0 30px 60px -30px rgb(10 14 34 / .55); }
+  .screen { position: relative; width: 100%; height: 100%; border-radius: 37px; overflow: hidden; background: #000; }
+  .screen canvas, .ghost canvas { position: absolute; top: 0; left: 50%; height: 100%; transform: translateX(-50%); image-rendering: pixelated; aspect-ratio: 240 / 427; }
+  .ghost { position: absolute; inset: 12px; pointer-events: none; opacity: 0; transition: opacity .2s; }
+  .ghost canvas { opacity: .32; }
+  .phone.show-cut { overflow: visible; }
+  .phone.show-cut .ghost { opacity: 1; }
+  .island { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 30%; height: 26px; border-radius: 20px; background: #000; z-index: 2; }
+  .caption { margin: 0; max-width: 34ch; min-height: 3em; text-align: center; font-size: 17px; line-height: 1.4; }
+  .caption::before { content: "\201C"; } .caption::after { content: "\201D"; }
+  .caption:empty::before, .caption:empty::after { content: none; }
+
+  .scenes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 360px; }
+  .scenes button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer; }
+  .scenes button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; cursor: pointer; }
+
+  section { margin-bottom: 44px; }
+  .cast { display: grid; gap: 2px; border-top: 1px solid var(--line); }
+  .member { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 16px 12px 16px 16px; border-bottom: 1px solid var(--line); cursor: pointer; position: relative; }
+  .member:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+  .member[aria-current="true"] { background: var(--surface); }
+  .member[aria-current="true"]::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 4px; background: var(--accent); }
+  .who { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .who strong { font: 400 20px/1.2 var(--pixel); font-weight: 400; }
+  .who span { color: var(--muted); font-size: 15px; }
+  .blurb { grid-column: 1; margin: 0; font-size: 15px; }
+  .line { grid-column: 1; margin: 2px 0 0; color: var(--muted); font-size: 15px; font-style: italic; }
+  .blurb textarea { width: 100%; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; resize: vertical; }
+  .actions { grid-column: 2; grid-row: 1 / span 3; display: flex; flex-direction: column; gap: 8px; align-items: stretch; justify-content: center; }
+  .btn { border: 1px solid var(--ink); background: transparent; border-radius: 10px; padding: 6px 14px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+  .btn.primary { background: var(--ink); color: var(--bg); }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  .using { font-size: 14px; color: var(--ok); font-weight: 700; text-align: center; }
+  .btn.playing { border-color: var(--accent); color: var(--accent); }
+
+  .voices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .voices button { border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+  .voices button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .voices small { color: var(--muted); }
+
+  .backdrops { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 14px; }
+  .backdrop { border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }
+  .backdrop canvas { width: 100%; aspect-ratio: 240 / 427; image-rendering: auto; border-radius: 12px; display: block; outline: 2px solid transparent; outline-offset: 3px; }
+  .backdrop[aria-current="true"] canvas { outline-color: var(--accent); }
+  .backdrop span { display: block; font-size: 14px; margin-top: 8px; }
+  .backdrop em { font-style: normal; color: var(--ok); font-weight: 700; }
+  .save-row { display: flex; gap: 12px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .note { color: var(--muted); font-size: 14px; min-height: 1.5em; }
+  .error { color: #B8433B; }
+
+  @media (max-width: 820px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 20px 16px 48px; }
+    .stage { position: static; }
+    .phone { width: min(100%, 280px); }
+  }
+  @media (prefers-reduced-motion: reduce) { .ghost, .caption { transition: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>facetime-me</h1>
+    <p>This is exactly what your phone shows when Claude calls. Try a personality, a voice and a background, then use the ones you like. The next call picks them up.</p>
+  </header>
+
+  <div class="stage">
+    <div class="phone" id="phone">
+      <div class="ghost"><canvas id="ghost" width="240" height="427"></canvas></div>
+      <div class="screen">
+        <canvas id="screen" width="240" height="427" aria-label="Live call screen"></canvas>
+        <div class="island"></div>
+      </div>
+    </div>
+    <p class="caption" id="caption" aria-live="polite"></p>
+    <div class="scenes" id="scenes" role="group" aria-label="Moment in the call"></div>
+    <label class="toggle"><input type="checkbox" id="showCut"> Show the edges your iPhone cuts off</label>
+  </div>
+
+  <main>
+    <section aria-labelledby="cast-h">
+      <h2 id="cast-h">Personality</h2>
+      <p class="hint">How Claude talks on the phone. It always speaks as "I". Play a sample to hear it.</p>
+      <div class="cast" id="cast"></div>
+    </section>
+
+    <section aria-labelledby="voice-h">
+      <h2 id="voice-h">Voice</h2>
+      <p class="hint" id="voiceHint">Each personality comes with a voice. Pick a different one here and hear it with the same lines.</p>
+      <div class="voices" id="voices" role="group" aria-labelledby="voice-h"></div>
+      <div class="save-row"><button class="btn primary" id="useVoice">Use this voice</button><span class="note" id="voiceNote"></span></div>
+    </section>
+
+    <section aria-labelledby="bg-h">
+      <h2 id="bg-h">Background</h2>
+      <p class="hint">What stands behind Claude during the call.</p>
+      <div class="backdrops" id="backdrops"></div>
+      <div class="save-row"><button class="btn primary" id="useTheme">Use this background</button><span class="note" id="themeNote"></span></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const W = 240, H = 427;
+const state = { options: null, theme: 'night', persona: 'buddy', voice: null, scene: 'approve', chosen: {} };
+const $ = id => document.getElementById(id);
+const screen = $('screen').getContext('2d'), ghost = $('ghost').getContext('2d');
+let audio = null, playingBtn = null;
+
+async function api(path, init) {
+  const res = await fetch(path, init);
+  if (!res.ok) { let msg = `HTTP ${res.status}`; try { msg = (await res.json()).error ?? msg; } catch {} throw new Error(msg); }
+  return res;
+}
+const frameOf = async (theme, scene) => new ImageData(new Uint8ClampedArray(await (await api(`/api/frame?theme=${theme}&scene=${scene}`)).arrayBuffer()), W, H);
+
+// The live phone: one frame at a time, as fast as the renderer answers (about 15 a second).
+async function loop() {
+  for (;;) {
+    const started = performance.now();
+    try { const img = await frameOf(state.theme, state.scene); screen.putImageData(img, 0, 0); ghost.putImageData(img, 0, 0); } catch {}
+    await new Promise(r => setTimeout(r, Math.max(0, 66 - (performance.now() - started))));
+  }
+}
+
+const persona = () => state.options.personas.find(p => p.id === state.persona);
+function captionFor() {
+  const p = persona(), l = p.lines;
+  return { hello: l.hello, approve: p.sample, failed: `${l.opener} my tests failed in the auth module. ${l.fixAsk}`, fixing: '', done: `${l.opener} I fixed it. Login works again. ${l.bye}` }[state.scene] ?? '';
+}
+const voiceOf = () => state.voice ?? persona().voice;
+
+function render() {
+  const { options, chosen } = state;
+  $('caption').textContent = captionFor();
+  $('scenes').innerHTML = '';
+  for (const s of options.scenes) {
+    const b = document.createElement('button');
+    b.textContent = s.label; b.setAttribute('aria-pressed', s.id === state.scene);
+    b.onclick = () => { state.scene = s.id; render(); };
+    $('scenes').append(b);
+  }
+
+  $('cast').innerHTML = '';
+  for (const p of options.personas) {
+    const row = document.createElement('div');
+    row.className = 'member'; row.setAttribute('aria-current', p.id === state.persona);
+    const inUse = chosen.personality === p.id;
+    row.innerHTML = `<div class="who"><strong></strong><span></span></div><p class="blurb"></p><p class="line"></p>
+      <div class="actions"><button class="btn play">Play</button>${inUse ? '<span class="using">On your calls</span>' : '<button class="btn primary use">Use</button>'}</div>`;
+    row.querySelector('strong').textContent = p.name;
+    row.querySelector('.who span').textContent = `${p.kind}, voice ${p.voice}`;
+    row.querySelector('.blurb').textContent = p.blurb;
+    row.querySelector('.line').textContent = `"${p.sample}"`;
+    if (p.id === 'custom') {
+      row.querySelector('.who span').textContent = 'Describe it and Claude plays it, voice verse';
+      row.querySelector('.blurb').innerHTML = '<textarea rows="2" maxlength="400" aria-label="Your own personality" placeholder="For example: a calm older brother who teases me a little and always says good job"></textarea>';
+      const box = row.querySelector('textarea');
+      box.value = state.customStyle ?? chosen.customStyle ?? '';
+      box.onclick = e => e.stopPropagation();
+      box.oninput = () => { state.customStyle = box.value; };
+      row.querySelector('.line').textContent = `"${p.sample}"`;
+    }
+    row.onclick = () => { if (state.persona !== p.id) { state.persona = p.id; state.voice = null; render(); } };
+    row.querySelector('.play').onclick = e => { e.stopPropagation(); state.persona = p.id; state.voice = null; render(); play(p.id, p.voice, $('cast').children[options.personas.indexOf(p)].querySelector('.play')); };
+    const use = row.querySelector('.use');
+    if (use) use.onclick = async e => {
+      e.stopPropagation();
+      if (p.id === 'custom' && !(state.customStyle ?? '').trim()) { row.querySelector('textarea').focus(); return; }
+      state.persona = p.id; state.voice = null; await choose({ personality: p.id, customStyle: state.customStyle });
+    };
+    $('cast').append(row);
+  }
+
+  $('voiceHint').textContent = `${persona().name} speaks with ${persona().voice} by default. Try another voice with the same lines.`;
+  $('voices').innerHTML = '';
+  for (const v of options.voices) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-pressed', v === voiceOf());
+    b.innerHTML = v === persona().voice ? `${v} <small>default</small>` : v;
+    b.onclick = () => { state.voice = v === persona().voice ? null : v; render(); play(state.persona, v, $('voices').children[options.voices.indexOf(v)]); };
+    $('voices').append(b);
+  }
+  const savedVoice = chosen.personality === state.persona && (chosen.voice ?? persona().voice) === voiceOf();
+  $('useVoice').disabled = savedVoice;
+  $('useVoice').textContent = savedVoice ? 'On your calls' : `Use ${persona().name} with ${voiceOf()}`;
+
+  for (const el of $('backdrops').children) el.setAttribute('aria-current', el.dataset.id === state.theme);
+  for (const el of $('backdrops').children) el.querySelector('em').hidden = chosen.theme !== el.dataset.id;
+  const savedTheme = chosen.theme === state.theme;
+  $('useTheme').disabled = savedTheme;
+  $('useTheme').textContent = savedTheme ? 'On your calls' : `Use ${options.themes.find(t => t.id === state.theme).name}`;
+}
+
+async function play(personaId, voice, button) {
+  if (audio) { audio.pause(); audio = null; }
+  if (playingBtn) playingBtn.classList.remove('playing');
+  playingBtn = button; button?.classList.add('playing');
+  const note = $('voiceNote');
+  note.className = 'note'; note.textContent = 'Getting the sample (first play takes a few seconds)…';
+  try {
+    const style = personaId === 'custom' ? `&style=${encodeURIComponent(state.customStyle ?? '')}` : '';
+    if (personaId === 'custom' && !(state.customStyle ?? '').trim()) throw new Error('Describe the personality first, then play it.');
+    const blob = await (await api(`/api/voice?persona=${personaId}&voice=${voice}${style}`)).blob();
+    note.textContent = '';
+    audio = new Audio(URL.createObjectURL(blob));
+    audio.onended = () => button?.classList.remove('playing');
+    await audio.play();
+  } catch (error) { note.className = 'note error'; note.textContent = error.message; button?.classList.remove('playing'); }
+}
+
+async function choose(change) {
+  const res = await api('/api/choose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change) });
+  state.chosen = (await res.json()).chosen;
+  render();
+}
+
+$('useVoice').onclick = () => choose({ personality: state.persona, customStyle: state.customStyle, voice: voiceOf() }).then(() => { $('voiceNote').textContent = `Saved. ${persona().name} will use ${voiceOf()} on your next call.`; });
+$('useTheme').onclick = () => choose({ theme: state.theme }).then(() => { $('themeNote').textContent = 'Saved for your next call.'; });
+$('showCut').onchange = e => $('phone').classList.toggle('show-cut', e.target.checked);
+
+(async () => {
+  state.options = await (await api('/api/options')).json();
+  state.chosen = state.options.chosen; state.customStyle = state.chosen.customStyle;
+  Object.assign(state, { theme: state.chosen.theme, persona: state.chosen.personality, voice: state.chosen.voice });
+  for (const t of state.options.themes) {
+    const b = document.createElement('button');
+    b.className = 'backdrop'; b.dataset.id = t.id;
+    b.innerHTML = `<canvas width="${W}" height="${H}"></canvas><span></span>`;
+    b.querySelector('span').textContent = t.name;
+    const em = document.createElement('em'); em.textContent = ', in use'; b.querySelector('span').append(em);
+    b.onclick = () => { state.theme = t.id; render(); };
+    $('backdrops').append(b);
+    const paint = () => frameOf(t.id, 'approve').then(img => b.querySelector('canvas').getContext('2d').putImageData(img, 0, 0)).catch(() => {});
+    paint(); setTimeout(paint, 900);
+  }
+  render();
+  loop();
+})();
+</script>
+</body>
+</html>

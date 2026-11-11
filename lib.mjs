@@ -50,6 +50,7 @@ export const demoEvent = (text) => { try { appendFileSync(demoFeed, `${text}\n`)
  * still read lines and calls. Never logged.
  */
 export function chertToken() {
+  if (!process.env.CHERT_API_KEY) loadSecrets();
   if (process.env.CHERT_API_KEY) return process.env.CHERT_API_KEY;
   try {
     const saved = JSON.parse(readFileSync(join(process.env.CHERT_HOME || join(homedir(), '.chert'), 'credentials.json'), 'utf8'));

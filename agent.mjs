@@ -6,8 +6,10 @@ import { cli, defineAgent, llm, ServerOptions, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-openai';
 import { LocalVideoTrack, TrackPublishOptions, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
 import { z } from 'zod';
-import { AGENT_NAME, chert, demoEvent, loadSecrets, resultPath, writeJson } from './lib.mjs';
+import { AGENT_NAME, chert, config, demoEvent, loadSecrets, resultPath, writeJson } from './lib.mjs';
+import { personaFor, personaLines } from './personas.mjs';
 import { FPS, HEIGHT, Mascot, WIDTH } from './mascot.mjs';
+import { loadFrames } from './bake.mjs';
 import { FixStream } from './activity.mjs';
 import { testCounts } from './scene.mjs';
 
@@ -16,10 +18,18 @@ loadSecrets();
 const SILENCE_MS = 14000, CALL_CAP_MS = 4 * 60000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function instructionsFor(job) {
+// A clear yes, and a no that overrides it ("yes, but don't..."). Approving or starting a fix needs one of
+// these in what the developer actually said after the question, so background noise can never say yes.
+const YES = /\b(yes|yeah|yea|yep|yup|ya|ja|si|sure|ok|okay|alright|go|go ahead|do it|fix it|send it|approve|approved|allow|please|absolutely|definitely|of course|sounds good|let's go)\b/i;
+const NO = /\b(no|nope|nah|don't|dont|do not|stop|wait|hold on|cancel|not yet|never)\b/i;
+
+function instructionsFor(job, persona) {
   const lines = [
-    'You are Claude Code, a coding agent, on a short FaceTime call with the developer you work for. Be clear you are an AI if asked.',
-    'Speak casually, in very short sentences. Never read code, paths or stack traces aloud in full.',
+    'You are Claude Code, a coding agent, on a short FaceTime call with the developer you work for. You are the little character on their screen.',
+    'Always speak as yourself in the first person: "I want to...", "I fixed...". Never say "Claude Code wants to" or "it wants to". Be clear you are an AI if asked.',
+    `Your personality: ${persona.style}`,
+    'Speak in very short sentences. Never read code, paths or stack traces aloud in full.',
+    'Background noise, silence or your own echo is not the developer talking. Only act on clear words.',
   ];
   if (job.canFix) lines.push(
     'You asked whether to fix the problem. If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself.',
@@ -27,7 +37,7 @@ function instructionsFor(job) {
     'If they ask something else, answer in one short sentence and then ask again whether you should fix it.',
   );
   else if (job.approval) lines.push(
-    'Claude Code is paused, waiting for permission to do one thing, described in the facts. You asked whether it may go ahead.',
+    'You are paused, waiting for permission to do one thing, described in the facts. You asked whether you may go ahead.',
     'If the developer clearly says yes, call the approve tool immediately and say nothing yourself. If they also say to always allow this kind of thing (for example "yes, always" or "don\'t ask again"), call approve with always set to true.',
     'If they say no, or anything unsure, call the deny tool with their reason and say nothing yourself. Never approve without a clear yes.',
     'If they ask what it is or why, answer in one short sentence from the facts, then ask again whether it can go ahead.',
@@ -40,15 +50,19 @@ function instructionsFor(job) {
 }
 
 export default defineAgent({
+  // Load the mascot frames once per worker process, before any call arrives, so answering is instant.
+  prewarm: async proc => { proc.userData.frames = loadFrames(); },
   entry: async ctx => {
     const job = (() => { try { return JSON.parse(ctx.job.metadata || '{}'); } catch { return {}; } })();
+    const settings = config(), persona = personaFor(settings);
     // An inbound FaceTime (chert dev) carries no script from place-call.mjs: give it a plain chat one.
-    if (!job.lines) Object.assign(job, { inbound: true, canFix: false, look: 'idle', lines: { hello: "Hey! It's Claude. What's up?", bye: 'Okay, talk soon. Bye!' } });
+    if (!job.lines) Object.assign(job, { inbound: true, canFix: false, look: 'idle', lines: {} });
+    job.lines = personaLines(persona, job);
     job.room ??= ctx.room.name;
     const started = Date.now();
     const result = { room: ctx.room.name, answered: false, fix: job.canFix ? { status: 'not_offered_yet' } : null, timeline: [], agentSaid: [], userSaid: [] };
     const save = () => writeJson(resultPath(job.room), result);
-    const mascot = new Mascot({ onChange: (look, file) => { result.timeline.push({ atMs: Date.now() - started, look, file }); save(); } });
+    const mascot = new Mascot({ frames: ctx.proc?.userData?.frames, theme: settings.theme, onChange: (look, file) => { result.timeline.push({ atMs: Date.now() - started, look, file }); save(); } });
     mascot.footer(job.project ?? '');
     let lastTests = null;
 
@@ -64,6 +78,7 @@ export default defineAgent({
     const videoTimer = setInterval(pushFrame, 1000 / FPS);
 
     // Which part of the conversation we are in, plus the live speaking state, decides the look.
+    let askedAt = Infinity; const heard = [];
     let fixLook = 'thinking', phase = 'ringing', agentState = 'initializing', userSpeaking = false, lastReplyAsked = false, ended = false, silenceTimer = null, processing = false, processingTimer = null;
     const refresh = () => {
       if (phase === 'fixing') return mascot.play(fixLook);
@@ -85,7 +100,12 @@ export default defineAgent({
     };
 
     const session = new voice.AgentSession({
-      llm: new realtime.RealtimeModel({ model: 'gpt-realtime', voice: 'marin', inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' } }),
+      llm: new realtime.RealtimeModel({
+        model: 'gpt-realtime', voice: settings.voice ?? persona.voice, inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+        // Semantic turn detection plus phone noise reduction: a cough or a TV in the room is not a turn.
+        turnDetection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true },
+        inputAudioNoiseReduction: { type: 'near_field' },
+      }),
     });
 
     const say = (text, toolChoice = 'none') => session.generateReply({
@@ -188,7 +208,7 @@ export default defineAgent({
       tools.approve = llm.tool({
         description: 'Let Claude Code go ahead. Use only after a clear yes. Set always to true if they said to always allow this kind of thing.',
         parameters: z.object({ always: z.boolean().optional() }),
-        execute: async ({ always }) => { decide({ behavior: 'allow', always: always === true }, job.lines.approved, 'approved'); return undefined; },
+        execute: async ({ always }) => { if (!(await heardYes())) return NOT_HEARD; decide({ behavior: 'allow', always: always === true }, job.lines.approved, 'approved'); return undefined; },
       });
       tools.deny = llm.tool({
         description: 'Stop Claude Code from doing it. Use when the developer says no or is unsure.',
@@ -197,10 +217,22 @@ export default defineAgent({
       });
       delete tools.end_call;
     }
+    // The model decides from audio; this checks the words. Waits briefly, since the transcript can land after the tool call.
+    const heardYes = async () => {
+      for (let i = 0; i < 20; i++) {
+        const said = heard.filter(entry => entry.at >= askedAt).map(entry => entry.text).join(' ');
+        if (YES.test(said) && !NO.test(said)) return true;
+        if (NO.test(said)) return false;
+        await sleep(100);
+      }
+      return false;
+    };
+    const NOT_HEARD = 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.';
+
     if (job.canFix) tools.start_fix = llm.tool({
       description: 'Start fixing the problem. Use as soon as the developer says yes.',
       parameters: z.object({}),
-      execute: async () => { if (!fixPromise) { result.userApprovedFix = true; save(); fixPromise = startFix().catch(() => {}); } return undefined; },
+      execute: async () => { if (!(await heardYes())) return NOT_HEARD; if (!fixPromise) { result.userApprovedFix = true; save(); fixPromise = startFix().catch(() => {}); } return undefined; },
     });
 
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, event => {
@@ -225,7 +257,7 @@ export default defineAgent({
       const item = event.item, text = item?.textContent?.trim();
       if (!text) return;
       if (item.role === 'assistant') { result.agentSaid.push(text); lastReplyAsked = text.endsWith('?'); refresh(); }
-      if (item.role === 'user') result.userSaid.push(text);
+      if (item.role === 'user') { result.userSaid.push(text); heard.push({ at: Date.now(), text }); }
       save();
     });
     session.on(voice.AgentSessionEventTypes.Error, event => { result.lastError = String(event?.error?.message ?? event?.error ?? 'unknown').slice(0, 300); save(); });
@@ -242,7 +274,7 @@ export default defineAgent({
 
     const starting = session.start({
       room: ctx.room,
-      agent: new voice.Agent({ instructions: instructionsFor(job), tools }),
+      agent: new voice.Agent({ instructions: instructionsFor(job, persona), tools }),
       record: false,
       inputOptions: { participantIdentity: job.bridgeIdentity, audioEnabled: true, videoEnabled: false, textEnabled: false, closeOnDisconnect: true, deleteRoomOnClose: false },
       outputOptions: { audioEnabled: true, transcriptionEnabled: false },
@@ -268,16 +300,18 @@ export default defineAgent({
       result.answered = true; save();
       phase = 'greet';
       mascot.play('greeting');
-      await sleep(job.greetMs ?? 2400);
+      await sleep(job.greetMs ?? 300);
       if (job.inbound) {
         setPhase('open');
+        askedAt = Date.now();
         await say(job.lines.hello).waitForPlayout();
         lastReplyAsked = true;
         return refresh();
       }
       setPhase('explain');
       mascot.card(job.card ?? { kind: 'error', title: 'Something broke', lines: [job.summary ?? ''] });
-      await (job.lines.explain ? say(job.lines.explain) : speak(job.lines.explainPrompt)).waitForPlayout();
+      askedAt = Date.now();
+      await (job.lines.explain ? say(job.lines.explain) : speak(`${job.lines.explainPrompt} Start with exactly "${persona.lines.opener}" and speak in your personality.`)).waitForPlayout();
       if (!job.canFix && !job.approval) {
         await sleep(400);
         return wrapUp(job.lines.bye, 'notified');

@@ -48,12 +48,27 @@ With the hooks installed (setup, last step), a permission prompt doesn't wait si
 - **Nothing gets stuck.** No answer, a failed call, or a busy line puts the normal terminal prompt back.
 - `facetime-me --off` pauses alerts and approvals, and `"approvals": {"enabled": false}` turns off approvals only.
 
+## Personality, voice and background
+
+```sh
+facetime-me --preview
+```
+
+Opens the call screen in your browser, exactly as your phone shows it, without placing a call. Try the
+personalities (Buddy, Chill, Nerd, Deadpan, Sweet, Classic, or describe your own), hear each voice, and
+pick a background (night sky, sunrise, blue sky, mint, terminal, peach room). Click **Use** and the
+next call picks it up. Your picks live in `config.json` as `personality`, `voice` and `theme`.
+
+On the call, Claude always talks as itself ("I want to push your fix"), and it only approves or starts a
+fix after it hears a clear yes in your words, so background noise can't say yes for you.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `facetime-me --setup` | The setup above. Re-run it to change keys or add the alert hooks |
 | `facetime-me --listen` | Answer FaceTime calls until Ctrl+C. One listener at a time |
+| `facetime-me --preview` | See the call screen in your browser and pick a personality, voice and background |
 | `facetime-me --demo` | A scripted, recordable demo: a build fails, it calls you, fixes it on the call |
 | `facetime-me --on` / `--off` / `--status` | Pause or resume the "call me when something breaks" alerts |
 

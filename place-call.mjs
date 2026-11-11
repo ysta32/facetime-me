@@ -104,11 +104,22 @@ async function main() {
   const agentIdentity = await agentReady();
   log(`${room} agent ready`);
 
-  const created = await chert('POST', '/calls', {
-    direction: 'outbound', mode: 'customer_managed', line_id: lineId, destination: phone, destination_type: 'phone',
-    media: { audio: true, video: true }, livekit_url: process.env.LIVEKIT_URL,
-    participant_token: bridgeToken(room, bridgeIdentity), remote_participant_identity: agentIdentity,
-  }, { idempotencyKey: `call-${room}` });
+  // A Shared line serves one call at a time and needs a few seconds to clear after one ends: ask Chert to
+  // queue us, and retry while it still answers 409 (line busy or settling).
+  let created = null;
+  for (let attempt = 0; !created; attempt++) {
+    try {
+      created = await chert('POST', '/calls', {
+        direction: 'outbound', mode: 'customer_managed', line_id: lineId, destination: phone, destination_type: 'phone',
+        media: { audio: true, video: true }, livekit_url: process.env.LIVEKIT_URL, when_busy: 'queue',
+        participant_token: bridgeToken(room, bridgeIdentity), remote_participant_identity: agentIdentity,
+      }, { idempotencyKey: `call-${room}-${attempt}` });
+    } catch (error) {
+      if (error.status !== 409 || attempt >= 12) throw error;
+      log(`${room} line not free yet (${error.message}), retrying`);
+      await sleep(5000);
+    }
+  }
   callId = created.id;
   log(`${room} call ${callId} allocated (project ${projectId})`);
   demoEvent('ringing');

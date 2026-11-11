@@ -6,18 +6,26 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-export const GRID = 4, LW = 180, LH = 320;
+// 240x427 grid at 3x = the 720x1280 frame. iPhones fill the screen and cut ~9% off each side, so
+// everything that matters stays inside SAFE (the centre 80%).
+export const GRID = 3, LW = 240, LH = 427;
+export const SAFE = { left: 30, right: LW - 30 };
 
 const hex = h => { const n = parseInt(h.slice(1), 16); return (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | (n >> 16)) >>> 0; };
 const C = {
-  sky: ['#111731', '#161E3B', '#1C2647', '#232F56', '#2B3A66'].map(hex),
-  ground: ['#18203D', '#141A33', '#10152A'].map(hex),
-  horizon: hex('#3A4878'), shadow: hex('#0B1026'),
-  star: ['#33406C', '#6874A3', '#C3CCEB'].map(hex),
   paper: hex('#F2EBDF'), ink: hex('#22305A'), dim: hex('#7D8199'), bar: hex('#D3CABA'), bar2: hex('#B9C0D8'),
-  orange: hex('#E88C40'), orangeSoft: hex('#F7D3AE'), green: hex('#2E8B57'), red: hex('#B8433B'), cardShadow: hex('#0A0E22'),
-  footer: hex('#56638F'),
+  orange: hex('#E88C40'), orangeSoft: hex('#F7D3AE'), green: hex('#2E8B57'), red: hex('#B8433B'),
 };
+/** Backgrounds. sky/ground are dithered top-to-bottom; decor is what drifts or twinkles in the sky. */
+export const THEMES = {
+  night: { name: 'Night sky', sky: ['#111731', '#161E3B', '#1C2647', '#232F56', '#2B3A66'], ground: ['#18203D', '#141A33', '#10152A'], horizon: '#3A4878', shadow: '#0B1026', decor: 'stars', star: ['#33406C', '#6874A3', '#C3CCEB'], footer: '#56638F', cardShadow: '#0A0E22' },
+  dawn: { name: 'Sunrise', sky: ['#6E5A9C', '#9A6FA6', '#C987A4', '#EBA59B', '#F6C79A'], ground: ['#7A4F6E', '#663F5E', '#53334F'], horizon: '#F9DDA8', shadow: '#3F2640', decor: 'sun', star: ['#F6C79A', '#FBE3B8', '#FFF6DE'], footer: '#F9DDA8', cardShadow: '#3F2640' },
+  daylight: { name: 'Blue sky', sky: ['#5DA9E9', '#6FB5EC', '#84C1EF', '#9CCEF2', '#B6DBF5'], ground: ['#79B866', '#6AA85A', '#5B984E'], horizon: '#A6D68C', shadow: '#4C8442', decor: 'clouds', star: ['#DCEBFA', '#F1F7FD', '#FFFFFF'], footer: '#2F5F8F', cardShadow: '#3B78AE' },
+  mint: { name: 'Mint', sky: ['#BFE8D9', '#C9ECDF', '#D3F0E5', '#DDF3EA', '#E7F7F0'], ground: ['#F3E5CF', '#EADAC1', '#E0CEB3'], horizon: '#9BD3BE', shadow: '#CDB797', decor: 'sparkles', star: ['#9BD3BE', '#F2A7B8', '#FFFFFF'], footer: '#5F8F7E', cardShadow: '#8FBFAE' },
+  terminal: { name: 'Terminal', sky: ['#0F1A14', '#112019', '#13251C', '#152A20', '#173024'], ground: ['#0D1611', '#0B130F', '#09100C'], horizon: '#2F7A4E', shadow: '#050906', decor: 'grid', star: ['#1D3F2C', '#2F7A4E', '#7BE0A4'], footer: '#3F9A66', cardShadow: '#050906' },
+  peach: { name: 'Peach room', sky: ['#F6D5C3', '#F4CDB9', '#F1C4AE', '#EEBCA4', '#EBB39A'], ground: ['#C98F72', '#BC8266', '#AE765B'], horizon: '#E3A587', shadow: '#9A6650', decor: 'none', star: ['#F9E3D6', '#FCEEE6', '#FFFFFF'], footer: '#8E5A44', cardShadow: '#B97F64' },
+};
+const palette = id => { const t = THEMES[id] ?? THEMES.night; return { ...t, sky: t.sky.map(hex), ground: t.ground.map(hex), star: t.star.map(hex), horizon: hex(t.horizon), shadow: hex(t.shadow), footer: hex(t.footer), cardShadow: hex(t.cardShadow) }; };
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
 
 const FONT = JSON.parse(readFileSync(join(HERE, 'font.json'), 'utf8'));
@@ -88,37 +96,55 @@ function describe(card) {
 
 export class Scene {
   /** body: the mascot's opaque bounding box at native size, used to stand it on the horizon. */
-  constructor({ body }) {
+  constructor({ body, theme }) {
+    this.T = palette(theme);
     this.px = new Uint32Array(LW * LH);
     this.out = new Uint8Array(720 * 1280 * 4);
     this.out32 = new Uint32Array(this.out.buffer);
     this.bodyX = Math.round(LW / 2 - (body.left + body.right + 1) / 2);
-    this.feet = 254;
+    this.feet = 330;
     this.bodyY = this.feet - body.bottom - 1;
     this.headTop = this.bodyY + body.top;
     this.horizon = this.feet + 1;
+    this.bodyBox = body;
     this.bg = this.buildBackground(body);
     const r = rng(7);
-    this.stars = Array.from({ length: 14 }, () => ({ x: 6 + Math.floor(r() * (LW - 12)), y: 4 + Math.floor(r() * (this.horizon - 60)), period: 2400 + r() * 3600, phase: r() * 6.28, big: r() > 0.75 }));
+    this.stars = Array.from({ length: 18 }, () => ({ x: 6 + Math.floor(r() * (LW - 12)), y: 4 + Math.floor(r() * (this.horizon - 60)), period: 2400 + r() * 3600, phase: r() * 6.28, big: r() > 0.75 }));
+    this.clouds = Array.from({ length: 4 }, (_, i) => ({ x: r() * LW, y: 20 + i * 52 + Math.floor(r() * 20), w: 22 + Math.floor(r() * 18), speed: 0.0015 + r() * 0.002 }));
     this.card = null;
     this.footer = '';
   }
 
+  setTheme(theme) { this.T = palette(theme); this.bg = this.buildBackground(this.bodyBox); }
+
   buildBackground(body) {
+    const T = this.T;
     const bg = new Uint32Array(LW * LH);
     for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) {
-      const steps = y <= this.horizon ? C.sky : C.ground;
+      const steps = y <= this.horizon ? T.sky : T.ground;
       const t = y <= this.horizon ? y / this.horizon : (y - this.horizon) / (LH - this.horizon);
       const f = t * (steps.length - 1), lo = Math.floor(f);
       const pick = f - lo > BAYER[(y & 3) * 4 + (x & 3)] ? Math.min(lo + 1, steps.length - 1) : lo;
       bg[y * LW + x] = steps[pick];
     }
-    for (let x = 0; x < LW; x++) bg[this.horizon * LW + x] = C.horizon;
+    for (let x = 0; x < LW; x++) bg[this.horizon * LW + x] = T.horizon;
+    if (T.decor === 'sun') {
+      const sx = LW / 2 + 52, sy = this.horizon - 14, sr = 26;
+      for (let y = sy - sr; y < this.horizon; y++) for (let x = sx - sr; x <= sx + sr; x++) {
+        const d = ((x - sx) ** 2 + (y - sy) ** 2) / sr ** 2;
+        if (d <= 1 && (y % 5 !== 0 || y < sy - 8)) bg[y * LW + x] = d < 0.7 ? T.star[2] : T.star[1];
+      }
+    }
+    if (T.decor === 'grid') {
+      for (const d of [3, 7, 12, 19, 28, 40, 55, 74]) if (this.horizon + d < LH) for (let x = 0; x < LW; x++) bg[(this.horizon + d) * LW + x] = T.star[0];
+      for (let i = -12; i <= 12; i++) for (let y = this.horizon + 1; y < LH; y++) { const x = Math.round(LW / 2 + i * 6 * (y - this.horizon) / 8); if (x >= 0 && x < LW) bg[y * LW + x] = T.star[0]; }
+      for (let y = 0; y < this.horizon; y += 3) for (let x = 0; x < LW; x++) if (((x + y) & 7) === 0) bg[y * LW + x] = T.star[0];
+    }
     // A soft dithered shadow where the mascot stands.
     const cx = LW / 2, cy = this.feet + 2, rx = (body.right - body.left) / 2 + 10, ry = 4;
     for (let y = cy - ry; y <= cy + ry; y++) for (let x = Math.floor(cx - rx); x <= cx + rx; x++) {
       const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
-      if (d <= 0.55 || (d <= 1 && ((x + y) & 1) === 0)) bg[y * LW + x] = C.shadow;
+      if (d <= 0.55 || (d <= 1 && ((x + y) & 1) === 0)) bg[y * LW + x] = T.shadow;
     }
     return bg;
   }
@@ -152,10 +178,10 @@ export class Scene {
     if (!card) return;
     card.since ??= now;
     const t = now - card.since, info = describe(card);
-    const x0 = 8, w = LW - 16, y0 = 22, h = 8 + LINE + 4 + info.rows * LINE + 6;
+    const x0 = SAFE.left, w = SAFE.right - SAFE.left, y0 = 40, h = 8 + LINE + 4 + info.rows * LINE + 6;
     // Each new card wipes in from the top over 160 ms: the one bit of motion that says "something changed".
     this.clipY = y0 + Math.ceil((h + 8) * Math.min(1, t / 160));
-    this.rect(x0 + 2, y0 + 2, w, h, C.cardShadow);
+    this.rect(x0 + 2, y0 + 2, w, h, this.T.cardShadow);
     this.rect(x0, y0, w, h, C.paper);
     for (let i = 1; i < w - 1; i++) { this.dot(x0 + i, y0, C.ink); this.dot(x0 + i, y0 + h - 1, C.ink); }
     for (let j = 1; j < h - 1; j++) { this.dot(x0, y0 + j, C.ink); this.dot(x0 + w - 1, y0 + j, C.ink); }
@@ -309,14 +335,24 @@ export class Scene {
     const px = this.px;
     px.set(this.bg);
     this.clipY = LH;
-    for (const s of this.stars) {
+    const T = this.T;
+    if (T.decor === 'stars' || T.decor === 'sparkles') for (const s of this.stars) {
       const b = 0.5 + 0.5 * Math.sin(now / s.period * 6.283 + s.phase);
-      if (b < 0.3) continue;
-      const c = b > 0.85 ? C.star[2] : b > 0.55 ? C.star[1] : C.star[0];
+      if (b < (T.decor === 'sparkles' ? 0.6 : 0.3)) continue;
+      const c = b > 0.85 ? T.star[2] : b > 0.55 ? T.star[1] : T.star[0];
       px[s.y * LW + s.x] = c;
-      if (s.big && b > 0.85) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) px[(s.y + dy) * LW + s.x + dx] = C.star[1];
+      if (s.big && b > 0.85) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) px[(s.y + dy) * LW + s.x + dx] = T.star[1];
+    }
+    if (T.decor === 'clouds') for (const cl of this.clouds) {
+      const cx = Math.round(((cl.x + now * cl.speed) % (LW + 60)) - 30);
+      for (let y = 0; y < 9; y++) for (let x = 0; x < cl.w; x++) {
+        const lump = y >= 4 || (y >= 1 && x > cl.w * 0.2 && x < cl.w * 0.75) || (y === 0 && x > cl.w * 0.35 && x < cl.w * 0.6);
+        const X = cx + x, Y = cl.y + y;
+        if (lump && X >= 0 && X < LW) px[Y * LW + X] = y === 8 ? T.star[0] : T.star[2];
+      }
     }
     const data = clip.data, base = frame * 240 * 220 * 4;
+    // (the clip is 240x220 native; it sits centred on the grid)
     for (let y = 0; y < 220; y++) {
       const ly = this.bodyY + y;
       if (ly < 0 || ly >= LH) continue;
@@ -328,8 +364,9 @@ export class Scene {
       }
     }
     this.drawCard(now);
-    if (this.footer) { const n = Math.min(this.footer.length, 28); this.text(this.footer, Math.round((LW - n * FW) / 2), LH - 22, C.footer, 28); }
+    if (this.footer) { const n = Math.min(this.footer.length, 30); this.text(this.footer, Math.round((LW - n * FW) / 2), LH - 70, this.T.footer, 30); }
     // Upscale the grid to the 720x1280 camera frame.
+    if (this.gridOnly) return px;
     const out = this.out32, OW = LW * GRID, OH = 1280;
     for (let ly = 0; ly < LH; ly++) {
       const row0 = ly * GRID;

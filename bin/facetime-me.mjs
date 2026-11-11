@@ -6,6 +6,7 @@
 //   facetime-me --setup    one-time setup: Chert sign-in, phone verification, keys, hooks
 //   facetime-me --key      save a new Chert project API key (needed to place calls)
 //   facetime-me --listen   answer FaceTime calls to your Chert line until Ctrl+C (any terminal)
+//   facetime-me --preview  see the call screen in your browser: try personalities, voices and backgrounds
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -50,7 +51,7 @@ function jobFromHook(hook) {
       context: `Project: ${project}\nFailing command: ${oneLine(command, 200)}\nLast lines of the error:\n${tail}`,
       summary: `${project}: \`${oneLine(command, 70)}\` failed. ${oneLine(tail.split('\n').slice(-1)[0], 110)}`,
       fix: { command: 'claude', args, cwd: hook.cwd || process.cwd(), timeoutMs: 180000 },
-      lines: { ...quietLines, fixed: "Done.", explainPrompt: 'In ONE short spoken sentence of under 20 words, starting with "Hey,", say what just failed and why, using only the facts you were given. Name the project or file, not a path. Do not ask anything, do not offer anything.' },
+      lines: { ...quietLines, fixed: "Done.", explainPrompt: 'In ONE short spoken sentence of under 20 words, say in the first person what just failed for you and why, using only the facts you were given. Name the project or file, not a path. Do not ask anything, do not offer anything.' },
     };
   }
   if (event === 'StopFailure') {
@@ -59,7 +60,7 @@ function jobFromHook(hook) {
       kind: 'stopped', canFix: false, look: 'error', project, card: { kind: 'error', title: 'Claude Code stopped', lines: [String(reason), oneLine(hook.last_assistant_message, 80)].filter(Boolean) }, dedupeKey: fingerprint(`${project}|stop|${reason}`),
       context: `Project: ${project}\nThe task stopped with this error type: ${reason}\nDetails: ${oneLine(hook.error_details ?? hook.last_assistant_message, 300)}`,
       summary: `${project}: Claude Code stopped with ${reason}. ${oneLine(hook.last_assistant_message, 120)}`,
-      lines: { ...quietLines, bye: "That's all. Bye.", explainPrompt: 'In ONE short spoken sentence of under 20 words, starting with "Hey,", say that the task stopped and why, using only the facts you were given. Do not ask anything.' },
+      lines: { ...quietLines, bye: "That's all. Bye.", explainPrompt: 'In ONE short spoken sentence of under 20 words, say in the first person that you stopped and why, using only the facts you were given. Do not ask anything.' },
     };
   }
   if (event === 'Notification') {
@@ -71,7 +72,7 @@ function jobFromHook(hook) {
       kind: 'waiting', canFix: false, look: 'waiting', project, card: { kind: 'waiting', title: 'Claude Code needs you', buttons: false, text: oneLine(hook.message, 48) }, dedupeKey: fingerprint(`${project}|${session}|${kind}|${hook.message}`),
       context: `Project: ${project}\nClaude Code is waiting on the developer. Its notice says: ${oneLine(hook.message, 240)}`,
       summary: `${project}: Claude Code is waiting on you. ${oneLine(hook.message, 150)}`,
-      lines: { ...quietLines, bye: 'Come back to the terminal when you can. Bye.', explainPrompt: 'In ONE short spoken sentence of under 20 words, starting with "Hey,", say what Claude Code is waiting on, using only the facts you were given. Do not ask anything.' },
+      lines: { ...quietLines, bye: 'Come back to the terminal when you can. Bye.', explainPrompt: 'In ONE short spoken sentence of under 20 words, say in the first person what you are waiting on, using only the facts you were given. Do not ask anything.' },
     };
   }
   return null;
@@ -183,7 +184,11 @@ else if (arg === '--listen') {
   const { listen } = await import(pathToFileURL(join(HOME, 'listen.mjs')).href);
   await listen();
 }
-else if (arg) { console.error('usage: facetime-me [--setup] [--key] [--listen] [--demo [--here]] [--on] [--off] [--status]'); process.exit(2); }
+else if (arg === '--preview') {
+  const { preview } = await import(pathToFileURL(join(HOME, 'preview.mjs')).href);
+  await preview();
+}
+else if (arg) { console.error('usage: facetime-me [--setup] [--key] [--listen] [--preview] [--demo [--here]] [--on] [--off] [--status]'); process.exit(2); }
 else {
   try { await fromHook(); } catch (error) { log(`hook error: ${error.message}`); }
   process.exit(0);
