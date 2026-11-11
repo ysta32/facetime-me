@@ -2,7 +2,7 @@
 // server for frames from the same renderer the call uses, plays voice samples for each personality,
 // and saves the ones you pick to config.json (the next call uses them).
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -13,6 +13,8 @@ import { customPersona, DEFAULT_PERSONA, PERSONAS, VOICES } from './personas.mjs
 import { LH, LW, SAFE, THEMES } from './scene.mjs';
 
 const VOICE_CACHE = join(STATE, 'voices');
+const DEMO_FEED = join(STATE, 'demo-events.log');
+let callStartedAt = null;
 
 // What each scene puts on screen. The real call drives the same looks and cards.
 const SCENES = {
@@ -113,6 +115,20 @@ async function handle(req, res) {
     if ('voice' in body) { if (VOICES.includes(body.voice) && body.voice !== base) next.voice = body.voice; else delete next.voice; }
     writeJson(CONFIG_PATH, next);
     return json(res, 200, { chosen: choices() });
+  }
+  if (url.pathname === '/api/call' && req.method === 'POST') {
+    const lock = join(STATE, 'call.lock');
+    if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs < 8 * 60000) return json(res, 409, { error: 'A call is already in progress. Hang up, wait a few seconds, then try again.' });
+    rmSync(lock, { recursive: true, force: true });
+    writeFileSync(DEMO_FEED, '');
+    callStartedAt = Date.now();
+    // --demo opens its own big-font Terminal window, counts down 5 s, then breaks a build and rings you.
+    spawn(process.execPath, [join(HOME, 'bin', 'facetime-me.mjs'), '--demo'], { cwd: HOME, stdio: 'ignore', detached: true }).unref();
+    return json(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/call') {
+    const events = existsSync(DEMO_FEED) ? readFileSync(DEMO_FEED, 'utf8').split('\n').map(l => l.trim()).filter(Boolean) : [];
+    return json(res, 200, { startedAt: callStartedAt, events, busy: existsSync(join(STATE, 'call.lock')) });
   }
   json(res, 404, { error: 'not found' });
 }

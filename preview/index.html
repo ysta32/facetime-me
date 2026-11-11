@@ -45,6 +45,10 @@
   .caption::before { content: "\201C"; } .caption::after { content: "\201D"; }
   .caption:empty::before, .caption:empty::after { content: none; }
 
+  .call { display: grid; justify-items: stretch; gap: 6px; width: min(100%, 300px); }
+  .call .btn.primary { width: 100%; padding: 12px 16px; font-size: 16px; border-radius: 14px; background: var(--ok); border-color: var(--ok); color: #fff; }
+  .call .status { margin: 0; min-height: 1.4em; font-size: 14px; color: var(--muted); text-align: center; }
+  .call .status.error { color: #C0392B; }
   .scenes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 360px; }
   .scenes button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer; }
   .scenes button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -97,6 +101,10 @@
   <header>
     <h1>facetime-me</h1>
     <p>This is exactly what your phone shows when Claude calls. Try a personality, a voice and a background, then use the ones you like. The next call picks them up.</p>
+    <div class="call">
+      <button class="btn primary" id="callMe">Call my phone</button>
+      <p class="status" id="callStatus" aria-live="polite">Runs the full demo. A Terminal window opens and your phone rings.</p>
+    </div>
   </header>
 
   <div class="stage">
@@ -272,6 +280,28 @@ $('showCut').onchange = e => $('phone').classList.toggle('show-cut', e.target.ch
   render();
   loop();
 })();
+
+// "Call my phone": runs facetime-me --demo and follows its progress.
+const STEPS = { ringing: 'Ringing your phone…', answered: 'Connected. Say yes to let it fix the build.', 'fix-start': 'Fixing the build…', 'fix-ok': 'Build fixed.', 'fix-failed': 'The fix did not work.', 'summary-sent': 'Summary texted.', 'call-done': 'Call finished. Press again for another take.' };
+let callTimer = null;
+$('callMe').onclick = async () => {
+  const btn = $('callMe'), status = $('callStatus');
+  btn.disabled = true; status.className = 'status'; status.textContent = 'Starting… the Terminal window counts down from 5.';
+  try { await api('/api/call', { method: 'POST' }); }
+  catch (error) { status.className = 'status error'; status.textContent = error.message; btn.disabled = false; return; }
+  clearInterval(callTimer);
+  const began = Date.now();
+  callTimer = setInterval(async () => {
+    try {
+      const { events } = await (await api('/api/call')).json();
+      const last = events.at(-1);
+      const answered = events.includes('answered');
+      if (last) status.textContent = last.startsWith('call-failed') ? `Call failed: ${last.slice(12)}` : STEPS[last] ?? last;
+      if (last === 'call-done' && !answered) status.textContent = 'You did not pick up in time. Press again to retry.';
+      if (last === 'call-done' || last?.startsWith('call-failed') || Date.now() - began > 4 * 60000) { clearInterval(callTimer); btn.disabled = false; btn.textContent = 'Call again'; }
+    } catch {}
+  }, 1000);
+};
 </script>
 </body>
 </html>
