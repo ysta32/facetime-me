@@ -10,6 +10,7 @@ import { CONFIG_PATH, HOME, STATE, config, loadSecrets, writeJson } from './lib.
 import { loadFrames } from './bake.mjs';
 import { Mascot } from './mascot.mjs';
 import { customPersona, DEFAULT_PERSONA, PERSONAS, VOICES } from './personas.mjs';
+import { instructionsFor, tagsFor } from './prompt.mjs';
 import { LH, LW, SAFE, THEMES } from './scene.mjs';
 
 const VOICE_CACHE = join(STATE, 'voices');
@@ -28,7 +29,18 @@ const SCENES = {
 
 let frames;
 const mascots = new Map();
+// The practice call drives one shared look; every theme's live mascot follows it.
+const live = { look: 'idle', card: null, react: null, at: 0 };
+const liveMascots = new Map();
+function liveMascot(theme) {
+  let entry = liveMascots.get(theme);
+  if (!entry) { const mascot = new Mascot({ frames, theme }); mascot.scene.gridOnly = true; mascot.footer('my-app'); entry = { mascot, at: -1 }; liveMascots.set(theme, entry); }
+  if (entry.at !== live.at) { entry.mascot.play(live.look); entry.mascot.card(live.card); if (live.react) entry.mascot.react(live.react); entry.at = live.at; }
+  return entry.mascot;
+}
+
 function mascotFor(theme, scene) {
+  if (scene === 'live') return liveMascot(theme);
   const key = `${theme}:${scene}`;
   let entry = mascots.get(key);
   if (!entry) {
@@ -101,15 +113,17 @@ async function elevenList() {
 /** The personality's sample line in an ElevenLabs voice (Flash, the model the calls use), cached. */
 async function elevenSample(personaId, voiceId) {
   const persona = PERSONAS[personaId] ?? PERSONAS[DEFAULT_PERSONA];
+  const model = config().elevenModel || 'eleven_flash_v2_5', tag = tagsFor(config())[0];
+  const text = tag ? `[${tag}] ${persona.sample}` : persona.sample;
   if (!/^[A-Za-z0-9]{10,40}$/.test(voiceId ?? '')) throw Object.assign(new Error('unknown voice'), { status: 404 });
   const speed = Math.min(1.2, Math.max(0.7, Number(config().speed) || 1.1));
   mkdirSync(VOICE_CACHE, { recursive: true });
-  const file = join(VOICE_CACHE, `el-${voiceId}-${createHash('sha1').update(`${persona.sample}|${speed}|v3`).digest('hex').slice(0, 12)}.mp3`);
+  const file = join(VOICE_CACHE, `el-${voiceId}-${createHash('sha1').update(`${text}|${speed}|${model}|v3`).digest('hex').slice(0, 12)}.mp3`);
   if (existsSync(file)) return readFileSync(file);
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
     method: 'POST', signal: AbortSignal.timeout(30000),
     headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ text: persona.sample, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true, speed } }),
+    body: JSON.stringify({ text, model_id: model, voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true, speed } }),
   });
   if (!res.ok) throw Object.assign(new Error(`ElevenLabs could not voice that (HTTP ${res.status})`), { status: 502 });
   const audio = Buffer.from(await res.arrayBuffer());
@@ -120,7 +134,7 @@ async function elevenSample(personaId, voiceId) {
 function choices() {
   const c = config();
   const personality = PERSONAS[c.personality] || (c.personality === 'custom' && c.customStyle) ? c.personality : DEFAULT_PERSONA;
-  return { theme: THEMES[c.theme] ? c.theme : 'night', personality, voice: c.voice ?? null, customStyle: c.customStyle ?? '', elevenVoice: c.elevenVoice ?? ELEVEN_DEFAULT, eleven: Boolean(process.env.ELEVENLABS_API_KEY) && c.tts !== 'openai' };
+  return { theme: THEMES[c.theme] ? c.theme : 'night', personality, voice: c.voice ?? null, customStyle: c.customStyle ?? '', elevenVoice: c.elevenVoice ?? ELEVEN_DEFAULT, eleven: Boolean(process.env.ELEVENLABS_API_KEY) && c.tts !== 'openai', elevenModel: c.elevenModel || 'eleven_flash_v2_5', tags: tagsFor(c) };
 }
 
 async function handle(req, res) {
@@ -185,7 +199,97 @@ async function handle(req, res) {
     const events = existsSync(DEMO_FEED) ? readFileSync(DEMO_FEED, 'utf8').split('\n').map(l => l.trim()).filter(Boolean) : [];
     return json(res, 200, { startedAt: callStartedAt, events, busy: existsSync(join(STATE, 'call.lock')) });
   }
+  if (url.pathname === '/api/practice/scenarios') {
+    const scenarios = practiceScenarios(personaFrom({ persona: url.searchParams.get('persona'), customStyle: url.searchParams.get('style') }));
+    return json(res, 200, { scenarios: Object.entries(scenarios).map(([id, s]) => ({ id, label: s.label, opener: s.opener, facts: s.facts })) });
+  }
+  if (url.pathname === '/api/practice/start' && req.method === 'POST') return json(res, 200, await practiceStart(await readBody(req)));
+  if (url.pathname === '/api/practice/look' && req.method === 'POST') {
+    const body = await readBody(req);
+    Object.assign(live, { look: typeof body.look === 'string' ? body.look : 'idle', card: body.card ?? null, react: body.react ?? null, at: Date.now() });
+    return json(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/tts' && req.method === 'POST') return tts(res, String((await readBody(req)).text ?? '').slice(0, 600));
   json(res, 404, { error: 'not found' });
+}
+
+// ---- Practice calls: the real call's prompt and voice, in the browser, with nothing actually run. ----
+
+/** The three kinds of call, with the persona's own lines as the default opener. */
+export function practiceScenarios(persona) {
+  const l = persona.lines;
+  // "Hi!" + "your tests..." reads as two sentences, so the second one needs its capital.
+  const after = (opener, rest) => `${opener} ${/[.!?]$/.test(opener) ? rest[0].toUpperCase() + rest.slice(1) : rest}`;
+  return {
+    approve: { label: 'It asks permission', job: { approval: true }, opener: after(l.opener, `I want to push your login fix to GitHub. ${l.ask}`), facts: 'Claude Code wants to run: git push origin main\nWhy: push the login fix to GitHub', card: { kind: 'waiting', title: 'Allow it?' }, look: 'waiting' },
+    failed: { label: 'Your tests broke', job: { canFix: true }, opener: after(l.opener, `your tests failed in the auth module. ${l.fixAsk}`), facts: 'npm test failed: auth.test.js, 2 failing (expected 200, got 401)', card: { kind: 'error', title: 'Tests failed', lines: ['auth.test.js: 2 failing', 'expected 200, got 401'] }, look: 'error' },
+    chat: { label: 'Just say hi', job: { inbound: true }, opener: l.hello, facts: '', card: null, look: 'greeting' },
+  };
+}
+
+const personaFrom = body => body.persona === 'custom' && String(body.customStyle ?? '').trim()
+  ? customPersona(String(body.customStyle).trim().slice(0, 400)) : PERSONAS[body.persona] ?? PERSONAS[config().personality] ?? PERSONAS[DEFAULT_PERSONA];
+
+const TOOLS = {
+  approve: { description: 'Let Claude Code go ahead. Use only after a clear yes. Set always to true if they said to always allow this kind of thing.', parameters: { type: 'object', properties: { always: { type: 'boolean' } } } },
+  deny: { description: 'Stop Claude Code from doing it. Use when the developer says no or is unsure.', parameters: { type: 'object', properties: { reason: { type: 'string' } } } },
+  start_fix: { description: 'Start fixing the problem. Use as soon as the developer says yes.', parameters: { type: 'object', properties: {} } },
+  end_call: { description: 'End the call. Use when the developer declines the fix, is done, or says goodbye.', parameters: { type: 'object', properties: {} } },
+};
+
+async function practiceStart(body) {
+  if (!process.env.OPENAI_API_KEY) throw new Error('No OpenAI key yet: run facetime-me --setup');
+  const settings = config(), persona = personaFrom(body);
+  const scenario = practiceScenarios(persona)[body.scenario] ?? practiceScenarios(persona).approve;
+  const opener = String(body.opener ?? '').trim().slice(0, 400) || scenario.opener;
+  const facts = String(body.facts ?? '').trim().slice(0, 1200);
+  const job = { ...scenario.job, ...(facts ? { context: facts } : {}) };
+  const eleven = Boolean(process.env.ELEVENLABS_API_KEY) && settings.tts !== 'openai';
+  const tags = eleven ? tagsFor(settings) : [];
+  const names = job.approval ? ['approve', 'deny'] : job.canFix ? ['start_fix', 'end_call'] : ['end_call'];
+  const speed = Number(settings.speed) || 1.1;
+  const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+    method: 'POST', signal: AbortSignal.timeout(15000),
+    headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ expires_after: { anchor: 'created_at', seconds: 600 }, session: {
+      type: 'realtime', model: 'gpt-realtime', instructions: instructionsFor(job, persona, { tags }),
+      ...(eleven ? { output_modalities: ['text'] } : {}),
+      audio: {
+        input: { transcription: { model: 'gpt-4o-mini-transcribe' }, noise_reduction: { type: 'near_field' }, turn_detection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true } },
+        ...(eleven ? {} : { output: { voice: VOICES.includes(body.voice) ? body.voice : settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) } }),
+      },
+      tools: names.map(name => ({ type: 'function', name, ...TOOLS[name] })),
+    } }),
+  });
+  const minted = await response.json().catch(() => ({}));
+  if (!response.ok || !minted.value) throw new Error(`OpenAI would not start a call (HTTP ${response.status}${minted.error?.message ? `: ${minted.error.message}` : ''})`);
+  const l = persona.lines;
+  return { secret: minted.value, eleven, tags, opener, card: scenario.card, look: scenario.look,
+    lines: { approved: l.approved, denied: l.denied, bye: l.bye, fixed: 'All fixed. Tests pass now.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
+}
+
+/** ElevenLabs speech as raw 24 kHz PCM, streamed through as it arrives. Short lines are cached whole. */
+const spoken = new Map();
+async function tts(res, text) {
+  const settings = config();
+  if (!text.trim()) return json(res, 400, { error: 'Nothing to say.' });
+  if (!process.env.ELEVENLABS_API_KEY) return json(res, 400, { error: 'No ElevenLabs key: run pbpaste | facetime-me --key elevenlabs' });
+  const model = settings.elevenModel || 'eleven_flash_v2_5', voiceId = settings.elevenVoice || ELEVEN_DEFAULT;
+  const key = `${voiceId}|${model}|${text}`;
+  const head = { 'content-type': 'audio/L16; rate=24000', 'cache-control': 'no-store' };
+  if (spoken.has(key)) { res.writeHead(200, head); return res.end(spoken.get(key)); }
+  const speed = Math.min(1.2, Math.max(0.7, Number(settings.speed) || 1.1));
+  const upstream = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=pcm_24000${/^eleven_v[3-9]/.test(model) ? '' : '&optimize_streaming_latency=3'}`, {
+    method: 'POST', signal: AbortSignal.timeout(30000),
+    headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ text, model_id: model, voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true, speed } }),
+  });
+  if (!upstream.ok) return json(res, 502, { error: `ElevenLabs could not say that (HTTP ${upstream.status}): ${(await upstream.text()).slice(0, 200)}` });
+  res.writeHead(200, head);
+  const parts = [];
+  for await (const chunk of upstream.body) { parts.push(chunk); res.write(chunk); }
+  res.end();
+  if (text.length <= 300) { spoken.set(key, Buffer.concat(parts)); if (spoken.size > 200) spoken.delete(spoken.keys().next().value); }
 }
 
 export async function preview({ open = true } = {}) {
