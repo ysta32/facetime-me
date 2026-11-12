@@ -11,6 +11,8 @@ import { loadFrames } from './bake.mjs';
 import { Mascot } from './mascot.mjs';
 import { customPersona, DEFAULT_PERSONA, PERSONAS, VOICES } from './personas.mjs';
 import { instructionsFor, tagsFor } from './prompt.mjs';
+import { startWhisper, transcribe } from './stt.mjs';
+let whisperOn = false;
 import { LH, LW, SAFE, THEMES } from './scene.mjs';
 
 const VOICE_CACHE = join(STATE, 'voices');
@@ -210,6 +212,14 @@ async function handle(req, res) {
     Object.assign(live, { look: typeof body.look === 'string' ? body.look : 'idle', card: body.card ?? null, react: body.react ?? null, at: Date.now() });
     return json(res, 200, { ok: true });
   }
+  // Your words on a practice call, transcribed locally by whisper.cpp: raw 16 kHz mono int16 PCM in.
+  if (url.pathname === '/api/stt' && req.method === 'POST') {
+    const parts = []; for await (const c of req) parts.push(c);
+    const buf = Buffer.concat(parts);
+    const pcm = new Int16Array(buf.buffer, buf.byteOffset, buf.length >> 1);
+    try { const started = Date.now(); const text = await transcribe(pcm); return json(res, 200, { text, ms: Date.now() - started }); }
+    catch (error) { return json(res, 503, { error: `Local transcription failed: ${error.message}` }); }
+  }
   if (url.pathname === '/api/practice/chat' && req.method === 'POST') {
     const body = await readBody(req);
     if (body.reset) live.chat = [];
@@ -267,7 +277,7 @@ async function practiceStart(body) {
       type: 'realtime', model: 'gpt-realtime', instructions: instructionsFor(job, persona, { tags }),
       ...(eleven ? { output_modalities: ['text'] } : {}),
       audio: {
-        input: { transcription: { model: 'gpt-4o-mini-transcribe' }, noise_reduction: { type: 'near_field' }, turn_detection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true } },
+        input: { transcription: { model: 'gpt-4o-transcribe' }, noise_reduction: { type: 'near_field' }, turn_detection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true } },
         ...(eleven ? {} : { output: { voice: VOICES.includes(body.voice) ? body.voice : settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) } }),
       },
       tools: names.map(name => ({ type: 'function', name, ...TOOLS[name] })),
@@ -276,7 +286,7 @@ async function practiceStart(body) {
   const minted = await response.json().catch(() => ({}));
   if (!response.ok || !minted.value) throw new Error(`OpenAI would not start a call (HTTP ${response.status}${minted.error?.message ? `: ${minted.error.message}` : ''})`);
   const l = persona.lines;
-  return { secret: minted.value, eleven, tags, opener, card: scenario.card, look: scenario.look,
+  return { secret: minted.value, eleven, tags, stt: whisperOn ? 'whisper' : 'openai', opener, card: scenario.card, look: scenario.look,
     lines: { approved: l.approved, denied: l.denied, bye: l.bye, nudge: l.nudge ?? 'Still there? Let me know.', noAnswer: l.noAnswer ?? 'No answer, so it is waiting in your terminal.', fixed: 'Fixed. All 12 tests pass now.', pushed: 'Done. Your fix is pushed to GitHub.', pushing: 'Pushing to main.', found: 'Found it. A missing await in login.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
 }
 
@@ -307,6 +317,7 @@ async function tts(res, text) {
 export async function preview({ open = true } = {}) {
   loadSecrets();
   frames = loadFrames();
+  startWhisper(config()).then(ok => { whisperOn = ok; console.log(ok ? 'facetime-me · local Whisper (whisper.cpp, large-v3-turbo) is transcribing practice calls' : 'facetime-me · whisper.cpp not found, so practice calls use OpenAI transcription. brew install whisper-cpp to switch.'); });
   const server = createServer((req, res) => handle(req, res).catch(error => json(res, 500, { error: error.message })));
   let port = Number(process.env.FACETIME_ME_PREVIEW_PORT) || 4777;
   await new Promise((resolve, reject) => {

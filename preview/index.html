@@ -466,6 +466,57 @@ $('answer').onclick = async () => {
 };
 function tick() { if (call.state !== 'live') return; const s = Math.floor((Date.now() - call.startedAt) / 1000); $('timer').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; setTimeout(tick, 500); }
 
+// ---------- Your words, transcribed locally by Whisper (whisper.cpp) ----------
+// The mic is kept as 16 kHz PCM for the last 30 s; when OpenAI's turn detection says you stopped,
+// that stretch goes to /api/stt. OpenAI's own transcript is only the fallback.
+const WORKLET = `registerProcessor('tap', class extends AudioWorkletProcessor {
+  process(inputs) { const ch = inputs[0]?.[0]; if (ch) this.port.postMessage(ch.slice(0)); return true; }
+});`;
+async function startRecorder(stream) {
+  const rec = new AudioContext({ sampleRate: 16000 });
+  await rec.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' })));
+  const node = new AudioWorkletNode(rec, 'tap');
+  rec.createMediaStreamSource(stream).connect(node);
+  const chunks = [];
+  node.port.onmessage = e => {
+    const f = e.data, pcm = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, f[i] * 32768));
+    const now = performance.now();
+    chunks.push({ t: now, pcm });
+    while (chunks.length && chunks[0].t < now - 30000) chunks.shift();
+  };
+  call.rec = { ctx: rec, chunks };
+}
+function cutSpeech(from, to) {
+  const parts = (call.rec?.chunks ?? []).filter(c => c.t >= from && c.t <= to);
+  const out = new Int16Array(parts.reduce((n, c) => n + c.pcm.length, 0));
+  let at = 0; for (const c of parts) { out.set(c.pcm, at); at += c.pcm.length; }
+  return out;
+}
+function heardWords(text, id) {
+  text = text?.trim();
+  if (!text) return;
+  call.heard.push({ at: Date.now(), text }); bubble('you', text); phoneSay('you', text, id); call.nudged = false;
+}
+async function whisperTurn() {
+  // Turn detection reports a little late, so reach back before it said you started.
+  const from = (call.speechStartedAt ?? performance.now() - 4000) - 900, to = performance.now();
+  await new Promise(r => setTimeout(r, 120));
+  const pcm = cutSpeech(from, to + 120);
+  if (pcm.length < 1600) return;
+  const id = `w${++captionId}`;
+  try {
+    const res = await api('/api/stt', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: pcm.buffer });
+    const { text } = await res.json();
+    heardWords(text, id);
+  } catch (error) {
+    console.warn('Local Whisper failed, using OpenAI transcripts for the rest of the call', error);
+    call.sttFailed = true;
+    if (call.lastOpenAI && Date.now() - call.lastOpenAI.at < 6000) heardWords(call.lastOpenAI.text, call.lastOpenAI.id);
+  }
+}
+const usingWhisper = () => call.session?.stt === 'whisper' && call.rec && !call.sttFailed;
+
 async function connect(opener) {
   const s = scenario();
   const session = await (await post('/api/practice/start', { scenario: s.id, opener, facts: $('facts').value, persona: state.persona, customStyle: state.customStyle, voice: state.voice })).json();
@@ -475,6 +526,7 @@ async function connect(opener) {
   call.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   if (call.ended) { call.mic.getTracks().forEach(t => t.stop()); return; }
   setMic(false); // nothing it hears counts until you answer and it has said its first line
+  if (session.stt === 'whisper') await startRecorder(call.mic);
   const pc = call.pc = new RTCPeerConnection();
   pc.addTrack(call.mic.getAudioTracks()[0], call.mic);
   if (!session.eleven) { const el = call.audioEl = new Audio(); el.autoplay = true; pc.ontrack = e => { el.srcObject = e.streams[0]; }; }
@@ -554,7 +606,7 @@ function finishTurn() {
 
 async function heardYes() {
   const since = call.speechStoppedAtMark ?? 0;
-  for (let waited = 0; waited < 1800; waited += 100) {
+  for (let waited = 0; waited < 2500; waited += 100) {
     const said = call.heard.filter(h => h.at >= since - 50).map(h => h.text).join(' ');
     if (YES.test(said) && !NO.test(said)) return true;
     if (NO.test(said)) return false;
@@ -627,13 +679,16 @@ async function onTool(name, callId, args) {
 function onEvent(e) {
   switch (e.type) {
     case 'input_audio_buffer.speech_started':
-      clearSilence();
+      clearSilence(); call.speechStartedAt = performance.now();
       if (player.busy && $('bargeIn').checked && !player.current?.scripted) { player.stop(); send({ type: 'response.cancel' }); }
       look('thinking'); break;
     case 'input_audio_buffer.speech_stopped':
-      call.speechStoppedAt = performance.now(); call.speechStoppedAtMark = Date.now(); look('thinking'); break;
+      call.speechStoppedAt = performance.now(); call.speechStoppedAtMark = Date.now(); look('thinking');
+      if (usingWhisper()) whisperTurn();
+      break;
     case 'conversation.item.input_audio_transcription.completed':
-      if (e.transcript?.trim()) { call.heard.push({ at: Date.now(), text: e.transcript.trim() }); bubble('you', e.transcript.trim()); phoneSay('you', e.transcript.trim(), e.item_id); call.nudged = false; }
+      if (usingWhisper()) { call.lastOpenAI = { at: Date.now(), text: e.transcript ?? '', id: e.item_id }; break; }
+      heardWords(e.transcript, e.item_id);
       break;
     case 'response.created': call.turn = null; break;
     case 'response.output_text.delta': case 'response.output_audio_transcript.delta': onDelta(e.delta ?? ''); break;
@@ -658,6 +713,7 @@ function hangup(reason) {
   player.stop();
   try { call.dc?.close(); call.pc?.close(); } catch {}
   call.mic?.getTracks().forEach(t => t.stop());
+  call.rec?.ctx.close().catch(() => {}); call.rec = null; call.sttFailed = false; call.speechStartedAt = null;
   if (call.audioEl) call.audioEl.srcObject = null;
   Object.assign(call, { dc: null, pc: null, mic: null });
   $('ringUi').hidden = true; $('callUi').hidden = true; $('poses').hidden = false; $('timer').textContent = '0:00';

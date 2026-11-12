@@ -93,7 +93,7 @@ export default defineAgent({
         return TAG_MODEL.test(elevenModel) ? new tts.StreamAdapter(voiceTts, new tokenize.basic.SentenceTokenizer({ minSentenceLength: 12, streamContextLength: 6 })) : voiceTts;
       })() } : {}),
       llm: new realtime.RealtimeModel({
-        model: 'gpt-realtime', ...(eleven ? { modalities: ['text'] } : { voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) }), inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+        model: 'gpt-realtime', ...(eleven ? { modalities: ['text'] } : { voice: settings.voice ?? persona.voice, speed: Math.min(1.5, Math.max(0.8, speed)) }), inputAudioTranscription: { model: 'gpt-4o-transcribe' },
         // Semantic turn detection, eager so replies start fast; noise reduction for phone audio. The yes-check
         // in heardYes() is what stops noise from approving anything, so eagerness can stay high.
         turnDetection: { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true },

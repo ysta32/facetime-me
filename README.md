@@ -52,6 +52,19 @@ With the hooks installed (setup, last step), a permission prompt doesn't wait si
 
 Copy an ElevenLabs API key, then run `pbpaste | facetime-me --key elevenlabs`. Calls then speak with ElevenLabs Flash instead of OpenAI's voices. Pick the voice in `facetime-me --preview`. To go back to OpenAI's voices, set `"tts": "openai"` in config.json.
 
+## Local transcription with Whisper (optional)
+
+Practice calls in the preview can transcribe what you say with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (large-v3-turbo) on your own Mac instead of OpenAI. It is more accurate on coding words ("main", "npm", "GitHub") and takes about 0.2 s per sentence on Apple Silicon.
+
+```sh
+brew install whisper-cpp
+mkdir -p ~/.cache/facetime-me
+curl -L -o ~/.cache/facetime-me/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin   # 574 MB
+```
+
+The preview starts it on its own when both are there (set `whisperModel` in config.json for another model file). Without them, it uses OpenAI's `gpt-4o-transcribe`.
+
 ## Personality, voice and background
 
 ```sh
