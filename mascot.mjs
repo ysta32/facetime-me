@@ -58,6 +58,11 @@ export class Mascot {
 
   footer(text) { this.scene.footer = text ?? ''; }
 
+  /** A caption bubble: who is 'claude' or 'you'; the same id updates a message as it grows. */
+  say(who, text, id) { this.scene.say(who, text, id, this.now()); }
+
+  clearChat() { this.scene.clearChat(); }
+
   isOnce(name) { return !this.frames[name].loop || PLAY_ONCE_OVERRIDE.has(name); }
 
   /** True once a play-once look has reached its end and is holding its last frame. */

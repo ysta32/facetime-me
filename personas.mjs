@@ -20,6 +20,7 @@ export const PERSONAS = {
       denied: "Got it, I'll leave it.",
       fixAsk: 'Want me to fix it?',
       noAnswer: "Missed you. It's waiting in your terminal.",
+      nudge: "You there? Just say yes or no.",
       bye: 'Talk soon!',
     },
     sample: "Hey! Quick one: I want to push your fix to GitHub. Cool if I go ahead?",
@@ -37,6 +38,7 @@ export const PERSONAS = {
       denied: 'All good, leaving it.',
       fixAsk: 'Want me to take care of it?',
       noAnswer: "No worries. It'll be in your terminal.",
+      nudge: "No rush. Let me know.",
       bye: 'Later.',
     },
     sample: "Hey. I'd like to push your fix to GitHub. Good to go?",
@@ -54,6 +56,7 @@ export const PERSONAS = {
       denied: 'Okay, holding off.',
       fixAsk: 'I think I know the fix. Want me to try?',
       noAnswer: "No answer, so it's parked in your terminal.",
+      nudge: "Still there? Let me know!",
       bye: 'Okay, back to the code. Bye!',
     },
     sample: "Oh hey! Tests are green, so I'd love to push your fix to GitHub. Can I ship it?",
@@ -71,6 +74,7 @@ export const PERSONAS = {
       denied: 'Fine. Leaving it alone.',
       fixAsk: 'Should I fix it?',
       noAnswer: "No answer. It'll wait in your terminal. Patiently.",
+      nudge: "Still waiting. Let me know.",
       bye: 'Bye.',
     },
     sample: "Hi. I'd like to push your fix to GitHub, before anything else breaks. Yes?",
@@ -78,16 +82,17 @@ export const PERSONAS = {
   sweet: {
     name: 'Sweet', kind: 'Gentle and cute', voice: 'ballad',
     blurb: 'Soft and kind. The cutest of the bunch without being a cartoon.',
-    style: 'You are gentle, sweet and kind, softly cheerful and a little cute, polite and thankful. Never childish.',
+    style: 'You are gentle, sweet and kind, softly cheerful and a little cute, polite and warm. Never childish.',
     tone: 'Soft, sweet and gentle, kind and cheerful, a little cute.',
     lines: {
       hello: "Hi! It's Claude. What can I do?",
       opener: 'Hi!',
       ask: 'Is that okay?',
-      approved: 'Thank you! Doing it now.',
+      approved: 'Yay! Doing it now.',
       denied: "Okay! I won't.",
       fixAsk: 'Want me to fix it for you?',
       noAnswer: "No answer, so it's waiting in your terminal. Bye!",
+      nudge: "Hello? Just let me know!",
       bye: 'Bye bye!',
     },
     sample: "Hi! I'd like to push your fix to GitHub. Is that okay?",
@@ -105,6 +110,7 @@ export const PERSONAS = {
       denied: "Okay, I'll stop.",
       fixAsk: 'Want me to fix it?',
       noAnswer: "No answer, so it's waiting in your terminal. Bye.",
+      nudge: "Still there? Let me know.",
       bye: 'Okay, bye.',
     },
     sample: "Hey, I want to push your fix to GitHub. Okay to go ahead?",
@@ -124,7 +130,7 @@ export const personaFor = settings => settings?.personality === 'custom' && sett
 export function personaLines(persona, job) {
   const p = persona.lines, own = job.lines ?? {};
   if (job.inbound) return { ...own, hello: p.hello, bye: p.bye };
-  if (job.approval) return { ...own, ask: p.ask, approved: p.approved, denied: p.denied, noAnswer: p.noAnswer };
-  if (job.canFix) return { ...own, ask: p.fixAsk, approved: p.approved };
+  if (job.approval) return { ...own, ask: p.ask, approved: p.approved, denied: p.denied, noAnswer: p.noAnswer, nudge: p.nudge };
+  if (job.canFix) return { ...own, ask: p.fixAsk, approved: p.approved, nudge: p.nudge };
   return own;
 }

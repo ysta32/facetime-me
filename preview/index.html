@@ -418,7 +418,17 @@ function latencyTag(el, ms) {
   s.title = 'From when you stopped talking to the first sound of the reply';
   el.append(s); call.latencies.push(ms);
 }
-const look = (look, card = call.card, react = null) => post('/api/practice/look', { look, card, react }).catch(() => {});
+let lastLook = '';
+const look = (look, card = call.card, react = null) => {
+  // Same pose and card as last time: skip it, so the phone never redraws for nothing.
+  const key = JSON.stringify([look, card]);
+  if (key === lastLook && !react) return;
+  lastLook = key;
+  post('/api/practice/look', { look, card, react }).catch(() => {});
+};
+// Captions on the phone itself, so a missed line can be read back.
+let captionId = 0;
+const phoneSay = (who, text, id = `c${++captionId}`) => { if (stripTags(text)) post('/api/practice/chat', { who, text: stripTags(text), id }).catch(() => {}); };
 const send = event => { if (call.dc?.readyState === 'open') call.dc.send(JSON.stringify(event)); };
 const setMic = on => { for (const t of call.mic?.getAudioTracks() ?? []) t.enabled = on && !call.muted; };
 
@@ -426,8 +436,9 @@ $('ringMe').onclick = async () => {
   if (call.state !== 'idle') return;
   ctx ??= new AudioContext({ sampleRate: 24000 });
   await ctx.resume();
-  Object.assign(call, { state: 'ringing', latencies: [], heard: [], muted: false, card: null, turn: null, speechStoppedAt: null, ended: false });
+  Object.assign(call, { working: false, state: 'ringing', latencies: [], heard: [], muted: false, card: null, turn: null, speechStoppedAt: null, ended: false, nudged: false, askedAt: 0 });
   $('chat').innerHTML = ''; showStatus('Ringing. Answer it on the phone.');
+  post('/api/practice/chat', { reset: true }).catch(() => {}); lastLook = '';
   $('ringMe').disabled = true; $('ringLabel').textContent = 'Ringing'; $('ringUi').hidden = false; $('poses').hidden = true;
   $('opener').readOnly = true; $('facts').readOnly = true;
   look('greeting', null);
@@ -483,19 +494,32 @@ function speak(text, { scripted = false, quiet = false, onFirstAudio } = {}) {
   if (scripted || !$('bargeIn').checked) setMic(false);
   if (scripted && !quiet) bubble('claude', stripTags(text));
   call.lastSaid = text;
-  const item = player.say(text, { scripted, onFirstAudio });
-  look(/\?\s*$/.test(stripTags(text)) ? 'waiting' : 'idle');
+  const caption = scripted ? () => phoneSay('claude', text) : null;
+  const item = player.say(text, { scripted, onFirstAudio: caption ? () => { caption(); onFirstAudio?.(); } : onFirstAudio });
+  if (/\?\s*$/.test(stripTags(text))) call.askedAt = Date.now();
+  if (!call.working) look(/\?\s*$/.test(stripTags(text)) ? 'waiting' : 'idle');
   return item;
+}
+// Quiet after a question: a gentle "let me know" at 15 s, and only 20 s after that does it hang up.
+let silenceTimer = null;
+const clearSilence = () => { clearTimeout(silenceTimer); silenceTimer = null; };
+function armSilence() {
+  clearSilence();
+  if (call.state !== 'live' || call.ended || !call.askedAt || scenario().id === 'chat') return;
+  const L = call.session.lines;
+  silenceTimer = call.nudged
+    ? setTimeout(async () => { const item = speak(L.noAnswer ?? 'No answer, so it is waiting in your terminal.', { scripted: true }); if (item) await item.finished; hangup('no answer'); }, 20000)
+    : setTimeout(() => { call.nudged = true; speak(L.nudge, { scripted: true }); }, 15000);
 }
 player.onIdle = () => {
   if (call.state !== 'live') return;
-  setMic(true);
-  look(/\?\s*$/.test(stripTags(call.lastSaid ?? '')) ? 'waiting' : 'idle');
+  setMic(true); armSilence();
+  if (!call.working) look(/\?\s*$/.test(stripTags(call.lastSaid ?? '')) ? 'waiting' : 'idle');
 };
 
 // Splits the model's streamed text and voices each piece as soon as it is complete.
 function onDelta(delta) {
-  const turn = call.turn ??= { text: '', spoken: 0, el: null };
+  const turn = call.turn ??= { text: '', spoken: 0, el: null, said: '', id: `t${++captionId}` };
   turn.text += delta;
   if (!turn.el) turn.el = bubble('claude', '');
   turn.el.firstChild.textContent = stripTags(turn.text);
@@ -513,7 +537,11 @@ function queueSentence(turn, sentence) {
   if (!stripTags(text)) return;
   const first = turn.queued === undefined;
   turn.queued = true;
-  speak(text, { onFirstAudio: first ? () => { if (call.speechStoppedAt) { latencyTag(turn.el, performance.now() - call.speechStoppedAt); call.speechStoppedAt = null; } } : undefined });
+  const upTo = turn.said = `${turn.said} ${text}`.trim();
+  speak(text, { onFirstAudio: () => {
+    phoneSay('claude', upTo, turn.id);
+    if (first && call.speechStoppedAt) { latencyTag(turn.el, performance.now() - call.speechStoppedAt); call.speechStoppedAt = null; }
+  } });
 }
 function finishTurn() {
   const turn = call.turn; call.turn = null;
@@ -521,6 +549,7 @@ function finishTurn() {
   const rest = turn.text.slice(turn.spoken);
   if (call.session.eleven && stripTags(rest)) queueSentence(turn, rest);
   if (!stripTags(turn.text) && turn.el) turn.el.remove();
+  if (!call.session.eleven) phoneSay('claude', turn.text, turn.id);
 }
 
 async function heardYes() {
@@ -534,6 +563,14 @@ async function heardYes() {
   return false;
 }
 
+async function heardAnything() {
+  for (let waited = 0; waited < 1800; waited += 100) {
+    if (call.heard.some(h => h.at >= (call.askedAt || 0) - 50)) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
 async function onTool(name, callId, args) {
   const reply = output => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: callId, output } });
   const L = call.session.lines;
@@ -542,28 +579,44 @@ async function onTool(name, callId, args) {
     bubble('sys', 'It wanted to go ahead but did not hear a clear yes');
     return;
   }
+  // Silence is never a no: deny and end_call need real words from you since the question.
+  if ((name === 'deny' || (name === 'end_call' && scenario().id !== 'chat')) && !(await heardAnything())) {
+    reply('Not done: the developer has not said anything yet, and silence is not a no. Say nothing and wait for them.');
+    return;
+  }
   reply('Done.');
+  // Answered: no more nudging, and the work cards own the screen from here.
+  call.askedAt = 0; clearSilence(); call.working = true;
   const say = async text => { const item = speak(text, { scripted: true }); if (item) await item.finished; else await new Promise(r => setTimeout(r, 1800)); };
+  // The acted-out work follows what Claude Code really shows: each tool call as a card, with real-looking output.
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const step = async (pose, card, ms) => { if (call.ended) return false; call.card = card; look(pose, card); await wait(ms); return !call.ended; };
   if (name === 'approve') {
-    look('done', { kind: 'done', title: args.always ? 'Always allowed' : 'Allowed', lines: ['Practice call: nothing ran'] }, { hearts: 3, hop: true });
     bubble('sys', args.always ? 'You said yes, always' : 'You said yes');
-    await say(L.approved); return hangup('approved');
+    const ack = say(L.approved);
+    const cmd = 'git push origin main';
+    if (!(await step('running', { kind: 'running', input: { command: cmd } }, 1400))) return;
+    if (!(await step('running', { kind: 'running', input: { command: cmd }, output: 'Writing objects: 100% (5/5), 612 bytes\nTo github.com:you/my-app.git\n   3f2a1c9..8b7d4e2  main -> main' }, 1600))) return;
+    await ack;
+    look('done', { kind: 'done', title: 'Pushed', lines: ['main -> main (8b7d4e2)', 'Practice call: nothing ran'] }, { hearts: 3, hop: true });
+    await say(L.bye); return hangup(args.always ? 'approved, always' : 'approved');
   }
   if (name === 'deny') {
-    look('idle', { kind: 'error', title: 'Stopped', lines: [args.reason ?? 'You said no'] });
+    look('idle', { kind: 'error', title: 'Stopped', lines: [args.reason ?? 'You said no', 'Nothing was pushed'] });
     bubble('sys', 'You said no');
     await say(L.denied); return hangup('denied');
   }
   if (name === 'start_fix') {
     bubble('sys', 'You said yes, so it acts out a fix');
     const ack = say(L.approved);
-    look('reading', { kind: 'reading', input: { file_path: 'src/auth/login.js' }, output: 'export async function login(user) {\n  const token = await sign(user);\n  return { token };\n}' });
-    await new Promise(r => setTimeout(r, 2600)); await ack;
-    if (call.ended) return;
-    look('testing', { kind: 'thinking', title: 'Running the tests' });
-    await new Promise(r => setTimeout(r, 1600));
-    if (call.ended) return;
-    look('done', { kind: 'done', title: 'Fixed', tests: { pass: 12, fail: 0 }, lines: ['Practice call: nothing changed'] }, { sparkles: 8, hop: true });
+    if (!(await step('testing', { kind: 'testing', input: { command: 'npx jest auth.test.js' }, output: 'expected 200, got 401', tests: { pass: 10, fail: 2 } }, 2200))) return;
+    if (!(await step('searchingCode', { kind: 'searchingCode', input: { pattern: 'status(401)' } }, 1800))) return;
+    if (!(await step('reading', { kind: 'reading', input: { file_path: 'src/auth/login.js' } }, 2200))) return;
+    await ack;
+    if (!(await step('writing', { kind: 'writing', input: { file_path: 'src/auth/login.js', old_string: 'ok = verify(pw)', new_string: 'ok = await verify(pw)' } }, 2600))) return;
+    if (!(await step('testing', { kind: 'testing', input: { command: 'npm test' } }, 1800))) return;
+    if (!(await step('testing', { kind: 'testing', input: { command: 'npm test' }, output: 'Tests: 12 passed, 12 total', tests: { pass: 12, fail: 0 } }, 1400))) return;
+    look('done', { kind: 'done', title: 'Fixed', tests: { pass: 12, fail: 0 }, lines: ['verify() was missing an await', 'Practice call: nothing changed'] }, { sparkles: 8, hop: true });
     await say(`${L.fixed} ${L.bye}`); return hangup('fixed');
   }
   if (name === 'end_call') { await say(L.bye); return hangup('said bye'); }
@@ -572,12 +625,13 @@ async function onTool(name, callId, args) {
 function onEvent(e) {
   switch (e.type) {
     case 'input_audio_buffer.speech_started':
+      clearSilence();
       if (player.busy && $('bargeIn').checked && !player.current?.scripted) { player.stop(); send({ type: 'response.cancel' }); }
       look('thinking'); break;
     case 'input_audio_buffer.speech_stopped':
       call.speechStoppedAt = performance.now(); call.speechStoppedAtMark = Date.now(); look('thinking'); break;
     case 'conversation.item.input_audio_transcription.completed':
-      if (e.transcript?.trim()) { call.heard.push({ at: Date.now(), text: e.transcript.trim() }); bubble('you', e.transcript.trim()); }
+      if (e.transcript?.trim()) { call.heard.push({ at: Date.now(), text: e.transcript.trim() }); bubble('you', e.transcript.trim()); phoneSay('you', e.transcript.trim(), e.item_id); call.nudged = false; }
       break;
     case 'response.created': call.turn = null; break;
     case 'response.output_text.delta': case 'response.output_audio_transcript.delta': onDelta(e.delta ?? ''); break;
@@ -596,7 +650,7 @@ function onEvent(e) {
 function hangup(reason) {
   if (call.ended) return;
   call.ended = true;
-  ringtone(false);
+  ringtone(false); clearSilence();
   const wasLive = call.state === 'live';
   call.state = 'idle';
   player.stop();

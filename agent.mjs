@@ -20,7 +20,7 @@ loadSecrets();
 // ElevenLabs "Will": young, relaxed, friendly. Change it with "elevenVoice" in config.json or in the preview.
 export const ELEVEN_DEFAULT_VOICE = 'bIHbv24MWmeRgasZH58o';
 
-const SILENCE_MS = 14000, CALL_CAP_MS = 4 * 60000;
+const NUDGE_MS = 15000, SILENCE_MS = 20000, CALL_CAP_MS = 4 * 60000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export default defineAgent({
@@ -68,9 +68,14 @@ export default defineAgent({
     const setPhase = next => { phase = next; refresh(); };
 
     const clearSilence = () => { if (silenceTimer) clearTimeout(silenceTimer); silenceTimer = null; };
+    // Quiet after a question: first a gentle "let me know", and only after a longer wait does it give up.
+    let nudged = false;
     const armSilence = () => {
       clearSilence();
-      if (!ended && phase === 'open' && (job.canFix || job.approval)) silenceTimer = setTimeout(() => wrapUp(job.lines.noAnswer, 'no_answer').catch(() => {}), SILENCE_MS);
+      if (ended || phase !== 'open' || !(job.canFix || job.approval)) return;
+      silenceTimer = nudged || !job.lines.nudge
+        ? setTimeout(() => wrapUp(job.lines.noAnswer, 'no_answer').catch(() => {}), SILENCE_MS)
+        : setTimeout(() => { nudged = true; void sayRaw(job.lines.nudge, 'none'); }, NUDGE_MS);
     };
 
     // With an ElevenLabs key, the Realtime model only writes text and ElevenLabs speaks it ("elevenModel",
@@ -118,7 +123,7 @@ export default defineAgent({
     if (voiceTts) {
       const asks = job.canFix || job.approval;
       for (const text of [job.lines.hello, job.lines.explain && asks ? `${job.lines.explain} ${job.lines.ask}` : job.lines.explain,
-        job.lines.approved, job.lines.denied, job.lines.bye, job.lines.noAnswer, job.lines.fixed, 'On it.',
+        job.lines.approved, job.lines.denied, job.lines.bye, job.lines.noAnswer, job.lines.nudge, job.lines.fixed, 'On it.',
         ...(job.stages ?? []).flatMap(stage => [stage.line, stage.ack])]) prevoice(typeof text === 'string' ? text : null);
     }
 
@@ -249,7 +254,7 @@ export default defineAgent({
       end_call: llm.tool({
         description: 'End the call. Use when the developer declines the fix, is done, or says goodbye.',
         parameters: z.object({}),
-        execute: async () => { void wrapUp(job.lines.bye, 'declined').catch(() => {}); return undefined; },
+        execute: async () => { if (!(await heardAnything())) return NOT_SPOKEN; void wrapUp(job.lines.bye, 'declined').catch(() => {}); return undefined; },
       }),
     };
     if (job.approval) {
@@ -268,7 +273,7 @@ export default defineAgent({
       tools.deny = llm.tool({
         description: 'Stop Claude Code from doing it. Use when the developer says no or is unsure.',
         parameters: z.object({ reason: z.string().optional() }),
-        execute: async ({ reason }) => { decide({ behavior: 'deny', reason: reason ?? 'Declined on FaceTime' }, job.lines.denied, 'denied'); return undefined; },
+        execute: async ({ reason }) => { if (!(await heardAnything())) return NOT_SPOKEN; decide({ behavior: 'deny', reason: reason ?? 'Declined on FaceTime' }, job.lines.denied, 'denied'); return undefined; },
       });
       delete tools.end_call;
     }
@@ -282,6 +287,13 @@ export default defineAgent({
       }
       return false;
     };
+    // Silence is never a no: deny and end_call need the developer to have actually said something since the question.
+    const heardAnything = async () => {
+      if (askedAt === Infinity) return true;
+      for (let i = 0; i < 20; i++) { if (heard.some(entry => entry.at >= askedAt && entry.text.trim())) return true; await sleep(100); }
+      return false;
+    };
+    const NOT_SPOKEN = 'Not done: the developer has not said anything yet, and silence is not a no. Say nothing and wait for them.';
     const NOT_HEARD = 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.';
 
     if (job.canFix) tools.start_fix = llm.tool({
@@ -299,7 +311,7 @@ export default defineAgent({
     session.on(voice.AgentSessionEventTypes.UserStateChanged, event => {
       const wasSpeaking = userSpeaking;
       userSpeaking = event.newState === 'speaking';
-      if (userSpeaking) clearSilence();
+      if (userSpeaking) { clearSilence(); nudged = false; }
       // The model takes a moment to react after the caller stops; stay on "thinking" through that gap.
       if (wasSpeaking && !userSpeaking) {
         processing = true;
@@ -311,6 +323,7 @@ export default defineAgent({
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, event => {
       const item = event.item, text = item?.textContent?.trim();
       if (!text) return;
+      if (item.role === 'assistant' || item.role === 'user') mascot.say(item.role === 'user' ? 'you' : 'claude', text, item.id);
       if (item.role === 'assistant') { result.agentSaid.push(text); lastReplyAsked = text.endsWith('?'); refresh(); }
       if (item.role === 'user') { result.userSaid.push(text); heard.push({ at: Date.now(), text }); if (job.demo) demoEvent(`heard ${JSON.stringify(text)}`); }
       save();

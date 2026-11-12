@@ -17,13 +17,15 @@ export function instructionsFor(job, persona, { tags = [] } = {}) {
     `Your personality: ${persona.style}`,
     'Speak in very short sentences. Never read code, paths or stack traces aloud in full.',
     'Background noise, silence or your own echo is not the developer talking. Only act on clear words.',
+    'Silence is never a no. If you hear nothing after a question, stay quiet and wait; never decide for them.',
+    'Never say thank you or thanks.',
   ];
   if (job.stages) lines.push(
     'You are walking the developer through a few steps on this call, asking before each one. You just asked a yes or no question.',
     'If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself (the tool says the acknowledgement for you).',
     'If they say no, or want to handle it themselves, call the end_call tool and say nothing yourself.',
     'If they ask something else, answer in one short sentence and then ask your last question again.',
-    'Never answer your own question. Until the developer has actually said yes out loud, never thank them and never say you are doing it.',
+    'Never answer your own question. Until the developer has actually said yes out loud, never say you are doing it.',
   );
   else if (job.canFix) lines.push(
     'You asked whether to fix the problem. If the developer says yes in any form, call the start_fix tool immediately and say nothing yourself (the tool says the acknowledgement for you).',
@@ -34,7 +36,7 @@ export function instructionsFor(job, persona, { tags = [] } = {}) {
     'You are paused, waiting for permission to do one thing, described in the facts. You asked whether you may go ahead.',
     'If the developer clearly says yes, call the approve tool immediately and say nothing yourself. If they also say to always allow this kind of thing (for example "yes, always" or "don\'t ask again"), call approve with always set to true.',
     'If they say no, or anything unsure, call the deny tool with their reason and say nothing yourself. Never approve without a clear yes.',
-    'Never answer your own question. Until the developer has actually said yes out loud, never thank them, never say you are doing it, and never say you will go ahead.',
+    'Never answer your own question. Until the developer has actually said yes out loud, never say you are doing it, and never say you will go ahead.',
     'If they ask what it is or why, answer in one short sentence from the facts, then ask again whether it can go ahead.',
   );
   else lines.push('You cannot change anything from this call. If the developer is done or says goodbye, call the end_call tool and say nothing yourself.');

@@ -15,6 +15,7 @@ const hex = h => { const n = parseInt(h.slice(1), 16); return (0xff000000 | ((n 
 const C = {
   paper: hex('#F2EBDF'), ink: hex('#22305A'), dim: hex('#7D8199'), bar: hex('#D3CABA'), bar2: hex('#B9C0D8'),
   orange: hex('#E88C40'), orangeSoft: hex('#F7D3AE'), green: hex('#2E8B57'), red: hex('#B8433B'),
+  you: hex('#DCD5FF'), youInk: hex('#2B2350'),
 };
 /** Backgrounds. sky/ground are dithered top-to-bottom; decor is what drifts or twinkles in the sky. */
 export const THEMES = {
@@ -118,6 +119,51 @@ export class Scene {
     this.card = null;
     this.footer = '';
     this.effects = [];
+    this.messages = [];
+  }
+
+  /**
+   * Captions as chat bubbles under the mascot: what Claude said (left, paper) and what the caller said
+   * (right, lilac), so a line you missed can be read again. Same id = the same message growing as it is spoken.
+   */
+  say(who, text, id = null, now = Date.now()) {
+    text = asciiOnly(String(text ?? '').replace(/\[[a-z ]{1,24}\]\s*/gi, '')).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    const same = id != null && this.messages.find(m => m.id === id);
+    if (same) { same.text = text; return; }
+    this.messages.push({ who: who === 'you' ? 'you' : 'claude', text, id, at: now });
+    if (this.messages.length > 8) this.messages.shift();
+  }
+
+  clearChat() { this.messages = []; }
+
+  drawChat(now) {
+    const top = this.horizon + 5, LH2 = 11;
+    let y = LH - 12;
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i], mine = m.who === 'you', newest = i === this.messages.length - 1;
+      const room = Math.floor((y - top - 6) / LH2);
+      if (room < 1) break;
+      let lines = wrap([m.text], mine ? 22 : 27);
+      // Too long to fit: keep the end of what was said, since that is what you just heard.
+      if (lines.length > room) { lines = lines.slice(-room); lines[0] = `..${lines[0]}`; }
+      const w = Math.max(...lines.map(l => Math.min(l.length, mine ? 24 : 29))) * FW + 9, h = lines.length * LH2 + 5;
+      const x0 = mine ? SAFE.right - w : SAFE.left, y0 = y - h;
+      // A new bubble pops up from below over 120 ms.
+      const rise = Math.max(0, 6 - Math.floor((now - m.at) / 20));
+      const fill = mine ? C.you : C.paper, line = C.ink;
+      const by = y0 + rise;
+      this.rect(x0 + 1, by, w - 2, h, fill); this.rect(x0, by + 1, w, h - 2, fill);
+      for (let k = 1; k < w - 1; k++) { this.dot(x0 + k, by - 1, line); this.dot(x0 + k, by + h, line); }
+      for (let k = 1; k < h - 1; k++) { this.dot(x0 - 1, by + k, line); this.dot(x0 + w, by + k, line); }
+      this.dot(x0, by, line); this.dot(x0 + w - 1, by, line); this.dot(x0, by + h - 1, line); this.dot(x0 + w - 1, by + h - 1, line);
+      // the tail, toward the speaker
+      const tx = mine ? x0 + w - 5 : x0 + 4;
+      this.dot(tx, by + h, fill); this.dot(tx + (mine ? 1 : -1), by + h, fill); this.dot(tx + (mine ? 1 : -1), by + h + 1, line); this.dot(tx + (mine ? 2 : -2), by + h + 2, line); this.dot(tx, by + h + 1, line);
+      const ink = newest || mine ? C.ink : C.dim;
+      lines.forEach((l, k) => this.text(l, x0 + 5, by + 5 + k * LH2, mine ? C.youInk : ink, mine ? 24 : 29));
+      y = y0 - 6;
+    }
   }
 
   /**
@@ -204,7 +250,11 @@ export class Scene {
     return bg;
   }
 
-  set(card) { this.card = card ? { ...card, since: null } : null; }
+  set(card) {
+    // The same card again (a new pose, same question) keeps its place instead of sliding in again.
+    if (card && this.card && JSON.stringify({ ...card, since: 0 }) === JSON.stringify({ ...this.card, since: 0 })) return;
+    this.card = card ? { ...card, since: null } : null;
+  }
 
   update(patch) { if (this.card) Object.assign(this.card, patch); }
 
@@ -419,8 +469,9 @@ export class Scene {
       }
     }
     this.drawCard(now);
+    if (this.messages.length) this.drawChat(now);
     this.drawEffects(now);
-    if (this.footer) { const n = Math.min(this.footer.length, 30); this.text(this.footer, Math.round((LW - n * FW) / 2), LH - 70, this.T.footer, 30); }
+    if (this.footer && !this.messages.length) { const n = Math.min(this.footer.length, 30); this.text(this.footer, Math.round((LW - n * FW) / 2), LH - 70, this.T.footer, 30); }
     // Upscale the grid to the 720x1280 camera frame.
     if (this.gridOnly) return px;
     const out = this.out32, OW = LW * GRID, OH = 1280;

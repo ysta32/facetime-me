@@ -30,11 +30,12 @@ const SCENES = {
 let frames;
 const mascots = new Map();
 // The practice call drives one shared look; every theme's live mascot follows it.
-const live = { look: 'idle', card: null, react: null, at: 0 };
+const live = { look: 'idle', card: null, react: null, at: 0, chat: [] };
 const liveMascots = new Map();
 function liveMascot(theme) {
   let entry = liveMascots.get(theme);
   if (!entry) { const mascot = new Mascot({ frames, theme }); mascot.scene.gridOnly = true; mascot.footer('my-app'); entry = { mascot, at: -1 }; liveMascots.set(theme, entry); }
+  if (entry.chatAt !== live.chatAt) { entry.mascot.clearChat(); for (const m of live.chat) entry.mascot.scene.say(m.who, m.text, m.id, m.at); entry.chatAt = live.chatAt; }
   if (entry.at !== live.at) { entry.mascot.play(live.look); entry.mascot.card(live.card); if (live.react) entry.mascot.react(live.react); entry.at = live.at; }
   return entry.mascot;
 }
@@ -209,6 +210,17 @@ async function handle(req, res) {
     Object.assign(live, { look: typeof body.look === 'string' ? body.look : 'idle', card: body.card ?? null, react: body.react ?? null, at: Date.now() });
     return json(res, 200, { ok: true });
   }
+  if (url.pathname === '/api/practice/chat' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body.reset) live.chat = [];
+    else if (typeof body.text === 'string') {
+      const same = body.id != null && live.chat.find(m => m.id === body.id);
+      if (same) same.text = body.text; else live.chat.push({ who: body.who === 'you' ? 'you' : 'claude', text: body.text.slice(0, 600), id: body.id ?? null, at: Date.now() });
+      live.chat = live.chat.slice(-8);
+    }
+    live.chatAt = Date.now() + Math.random();
+    return json(res, 200, { ok: true });
+  }
   if (url.pathname === '/api/tts' && req.method === 'POST') return tts(res, String((await readBody(req)).text ?? '').slice(0, 600));
   json(res, 404, { error: 'not found' });
 }
@@ -221,7 +233,7 @@ export function practiceScenarios(persona) {
   // "Hi!" + "your tests..." reads as two sentences, so the second one needs its capital.
   const after = (opener, rest) => `${opener} ${/[.!?]$/.test(opener) ? rest[0].toUpperCase() + rest.slice(1) : rest}`;
   return {
-    approve: { label: 'It asks permission', job: { approval: true }, opener: after(l.opener, `I want to push your login fix to GitHub. ${l.ask}`), facts: 'Claude Code wants to run: git push origin main\nWhy: push the login fix to GitHub', card: { kind: 'waiting', title: 'Allow it?' }, look: 'waiting' },
+    approve: { label: 'It asks permission', job: { approval: true }, opener: after(l.opener, `I want to push your login fix to GitHub. ${l.ask}`), facts: 'Claude Code wants to run: git push origin main\nWhy: push the login fix to GitHub (2 commits ahead of origin)', card: { kind: 'approve', title: 'Allow this?', command: 'git push origin main', lines: ['Push the login fix', '2 commits ahead of origin'] }, look: 'waiting' },
     failed: { label: 'Your tests broke', job: { canFix: true }, opener: after(l.opener, `your tests failed in the auth module. ${l.fixAsk}`), facts: 'npm test failed: auth.test.js, 2 failing (expected 200, got 401)', card: { kind: 'error', title: 'Tests failed', lines: ['auth.test.js: 2 failing', 'expected 200, got 401'] }, look: 'error' },
     chat: { label: 'Just say hi', job: { inbound: true }, opener: l.hello, facts: '', card: null, look: 'greeting' },
   };
@@ -265,7 +277,7 @@ async function practiceStart(body) {
   if (!response.ok || !minted.value) throw new Error(`OpenAI would not start a call (HTTP ${response.status}${minted.error?.message ? `: ${minted.error.message}` : ''})`);
   const l = persona.lines;
   return { secret: minted.value, eleven, tags, opener, card: scenario.card, look: scenario.look,
-    lines: { approved: l.approved, denied: l.denied, bye: l.bye, fixed: 'All fixed. Tests pass now.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
+    lines: { approved: l.approved, denied: l.denied, bye: l.bye, nudge: l.nudge ?? 'Still there? Let me know.', noAnswer: l.noAnswer ?? 'No answer, so it is waiting in your terminal.', fixed: 'All fixed. Tests pass now.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
 }
 
 /** ElevenLabs speech as raw 24 kHz PCM, streamed through as it arrives. Short lines are cached whole. */
