@@ -138,8 +138,9 @@ export class Scene {
   clearChat() { this.messages = []; }
 
   drawChat(now) {
-    const top = this.horizon + 5, LH2 = 11;
-    let y = LH - 12;
+    // In the open sky between the card and the mascot's head: the bottom of the screen belongs to the call controls.
+    const top = (this.card ? this.cardBottom ?? 40 : 24) + 6, LH2 = 11;
+    let y = this.headTop - 8;
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i], mine = m.who === 'you', newest = i === this.messages.length - 1;
       const room = Math.floor((y - top - 6) / LH2);
@@ -300,7 +301,8 @@ export class Scene {
     this.body(card, t, tx, by, w - 16);
     this.clipY = LH;
     // Thought dots from the card down to the mascot's head.
-    const bottom = y0 + h + 2, gap = Math.max(0, this.headTop - 30 - bottom), mid = LW / 2;
+    const bottom = y0 + h + 2; this.cardBottom = bottom;
+    const gap = Math.max(0, this.headTop - 30 - bottom), mid = LW / 2;
     [[mid + 26, bottom + 4, 4], [mid + 20, bottom + 6 + gap * 0.45 + 2, 3], [mid + 15, bottom + 8 + gap * 0.85 + 3, 2]].forEach(([dx, dy, s]) => this.rect(dx, Math.round(dy), s, s, C.paper));
   }
 
