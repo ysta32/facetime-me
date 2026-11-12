@@ -277,7 +277,7 @@ async function practiceStart(body) {
   if (!response.ok || !minted.value) throw new Error(`OpenAI would not start a call (HTTP ${response.status}${minted.error?.message ? `: ${minted.error.message}` : ''})`);
   const l = persona.lines;
   return { secret: minted.value, eleven, tags, opener, card: scenario.card, look: scenario.look,
-    lines: { approved: l.approved, denied: l.denied, bye: l.bye, nudge: l.nudge ?? 'Still there? Let me know.', noAnswer: l.noAnswer ?? 'No answer, so it is waiting in your terminal.', fixed: 'All fixed. Tests pass now.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
+    lines: { approved: l.approved, denied: l.denied, bye: l.bye, nudge: l.nudge ?? 'Still there? Let me know.', noAnswer: l.noAnswer ?? 'No answer, so it is waiting in your terminal.', fixed: 'Fixed. All 12 tests pass now.', pushed: 'Done. Your fix is pushed to GitHub.', pushing: 'Pushing to main.', found: 'Found it. A missing await in login.', notHeard: 'Not done: no clear yes in what the developer said. Ask again in one short sentence, in your personality.' } };
 }
 
 /** ElevenLabs speech as raw 24 kHz PCM, streamed through as it arrives. Short lines are cached whole. */

@@ -595,11 +595,12 @@ async function onTool(name, callId, args) {
     bubble('sys', args.always ? 'You said yes, always' : 'You said yes');
     const ack = say(L.approved);
     const cmd = 'git push origin main';
+    await ack; const pushing = say(L.pushing);
     if (!(await step('running', { kind: 'running', input: { command: cmd } }, 1400))) return;
     if (!(await step('running', { kind: 'running', input: { command: cmd }, output: 'Writing objects: 100% (5/5), 612 bytes\nTo github.com:you/my-app.git\n   3f2a1c9..8b7d4e2  main -> main' }, 1600))) return;
-    await ack;
+    await pushing;
     look('done', { kind: 'done', title: 'Pushed', lines: ['main -> main (8b7d4e2)', 'Practice call: nothing ran'] }, { hearts: 3, hop: true });
-    await say(L.bye); return hangup(args.always ? 'approved, always' : 'approved');
+    await say(L.pushed); await say(L.bye); return hangup(args.always ? 'approved, always' : 'approved');
   }
   if (name === 'deny') {
     look('idle', { kind: 'error', title: 'Stopped', lines: [args.reason ?? 'You said no', 'Nothing was pushed'] });
@@ -612,12 +613,13 @@ async function onTool(name, callId, args) {
     if (!(await step('testing', { kind: 'testing', input: { command: 'npx jest auth.test.js' }, output: 'expected 200, got 401', tests: { pass: 10, fail: 2 } }, 2200))) return;
     if (!(await step('searchingCode', { kind: 'searchingCode', input: { pattern: 'status(401)' } }, 1800))) return;
     if (!(await step('reading', { kind: 'reading', input: { file_path: 'src/auth/login.js' } }, 2200))) return;
-    await ack;
+    await ack; const found = say(L.found);
     if (!(await step('writing', { kind: 'writing', input: { file_path: 'src/auth/login.js', old_string: 'ok = verify(pw)', new_string: 'ok = await verify(pw)' } }, 2600))) return;
+    await found;
     if (!(await step('testing', { kind: 'testing', input: { command: 'npm test' } }, 1800))) return;
     if (!(await step('testing', { kind: 'testing', input: { command: 'npm test' }, output: 'Tests: 12 passed, 12 total', tests: { pass: 12, fail: 0 } }, 1400))) return;
     look('done', { kind: 'done', title: 'Fixed', tests: { pass: 12, fail: 0 }, lines: ['verify() was missing an await', 'Practice call: nothing changed'] }, { sparkles: 8, hop: true });
-    await say(`${L.fixed} ${L.bye}`); return hangup('fixed');
+    await say(L.fixed); await say(L.bye); return hangup('fixed');
   }
   if (name === 'end_call') { await say(L.bye); return hangup('said bye'); }
 }
